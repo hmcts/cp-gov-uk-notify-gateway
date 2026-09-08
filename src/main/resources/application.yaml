@@ -56,6 +56,14 @@ cp:
       base-url: ${CP_NG_GOVNOTIFY_BASE_URL:https://api.notifications.service.gov.uk}
       # Gov.Notify API key — injected from Key Vault in deployed environments; never a real key in config.
       api-key: ${CP_NG_GOVNOTIFY_API_KEY:}
+      # Corporate egress proxy for the outbound Gov.Notify HTTPS call, ported from the legacy
+      # notification context (gov.notify.proxy.*). Disabled by default: environments with direct
+      # outbound egress (STE/DEV verified) need nothing. Enable per environment in the Helm overlay
+      # where egress must traverse the corporate IMZO proxy (e.g. the prod nonlive/live proxy hosts).
+      proxy:
+        enabled: ${CP_NG_GOVNOTIFY_PROXY_ENABLED:false}
+        host: ${CP_NG_GOVNOTIFY_PROXY_HOST:}
+        port: ${CP_NG_GOVNOTIFY_PROXY_PORT:0}
     retry:
       # Preserved legacy email retry/poll backoff (seconds); legacy default from
       # notify.email.retry.threshold.durations. Overridable per environment without a redeploy.
