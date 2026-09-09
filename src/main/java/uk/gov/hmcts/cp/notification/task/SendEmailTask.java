@@ -76,6 +76,7 @@ public class SendEmailTask implements ExecutableTask {
         return result;
     }
 
+    @SuppressWarnings("PMD.ReturnEmptyCollectionRatherThanNull")
     private byte[] downloadAttachment(final SendEmailCommand command) {
         byte[] attachment = null;
         if (StringUtils.hasText(command.fileUri())) {

@@ -28,6 +28,7 @@ The two framework swaps that drive most deviations:
 | D3 | **Delivery-status classification (eager failure)** | Only `{technical-failure, permanent-failure, virus-scan-failed}` are `FAILED`; everything else (incl. `temporary-failure`, `validation-failed`, `not found`, unknown→`unexpected`) is treated as **in-progress and re-polled** | Same classification **changed** (implemented): in-progress is defined **positively** as `{accepted, created, sending, received, pending-virus-check}` (+ `delivered` = success); **all** other statuses are terminal failure. Paired with an in-task exhaustion handler (see D2) that marks failed once status-check retries are spent | **Yes — deliberate divergence** | GOV.UK Notify docs: `temporary-`/`permanent-failure` are Notify's final verdict on a message (Notify already retried up to 72h during `sending`); re-**polling** an existing id can never flip to `delivered`. Unknown→`unexpected` re-polling is meaningless. Divergence reaches legacy's eventual end-state (failure) **eagerly** and closes the D2 hot-loop for these statuses. "Resend on temporary/technical failure" is a separate feature legacy also lacked | new: `sender/NotificationStatus.java`, `task/CheckEmailStatusTask.java:68-84`; legacy: `.../client/NotificationStatus.java`, `.../task/processors/EmailStatusResponseProcessor.java`; [Notify statuses](https://docs.notifications.service.gov.uk/rest-api.html) |
 | D4 | **Attachment reference: `materialUrl` + `fileId` → `fileUri`** | Attachment referenced by **`fileId`** (+ `materialUrl`) — a centralised file-service identifier the service resolves to fetch the content | New BYO-filestore model (FR-004): attachment referenced by **`fileUri`**, a direct Azure Blob URI the attachment downloader addresses via managed identity (no SAS). The attachment filename is derived from the blob name in that URI (`EmailSender.filenameFrom` via `BlobUrlParts.parse(fileUri).getBlobName()`, then last path segment) | Yes — permanent | Fits the MbD BYO-filestore platform; direct blob addressing replaces the centralised file-service. Filename derivation reuses the same `BlobUrlParts` parser already used by `BlobClientFactory` on the same URI, so it is URL-decoded and query/SAS-safe | new: `contracts/command-send-email-notification.schema.json` (MVP delta note), `contracts/command-send-email-notification-legacy.schema.json` (`fileId`), `command/SendEmailCommand.java` (`fileUri`), `sender/EmailSender.java`, `blob/BlobClientFactory.java` |
 | D5 | **Blob host allow-list (SSRF / Managed-Identity-token guard)** | Endpoint + container were **JNDI-pinned** (`azure.filestore.endpoint` / `container-name`); nothing on the wire could redirect the MI token, so no host check existed | The wire-borne `fileUri` (D4) carries scheme/host/container/blob. `BlobClientFactory` now validates **`https` + host ∈ configured allow-list** (`cp.notification.blob.allowed-hosts`, set per env/stack in the Helm overlay) **before** attaching a token, rejecting anything else as `DisallowedBlobHostException` (terminal, no retry). Empty list ⇒ **fail-closed** in Workload-Identity mode; connection-string/local (Azurite) mode is exempt | **Yes — new control** | Legacy needed no equivalent because the account was config-pinned; carrying a full URI on the queue introduces an SSRF + MI-token-exfil surface, so the host must be constrained. No behaviour change for valid CP `fileUri`s | new: `blob/BlobHostValidator.java`, `blob/DisallowedBlobHostException.java`, `blob/BlobClientFactory.java`; legacy: `referencedata .../blobstore/AzureFileStoreBlobContainerClientProducer.java` (JNDI-pinned endpoint + container), `.../ReferenceDataFileInterceptor.java` (UUID blob name) |
+| D6 | **GOV.UK Notify corporate egress proxy** | Notify call routed through a corporate egress proxy (`gov.notify.proxy.enabled=true`, JNDI; host/port from `outgoing.proxy.*`, type http) | Proxy support ported (`cp.notification.govnotify.proxy.{enabled,host,port}` → 3-arg `NotificationClient`) but **disabled by default** — reaches `api.notifications.service.gov.uk` by **direct egress**; enabled per-environment only if egress sanity fails | **Yes — deliberate default** | The MbD service's AKS pods have verified direct outbound 443, unlike the WildFly estate the legacy proxy was written for; default-off avoids a needless hop and a proxy-host dependency, and the toggle is retained for any environment that blocks direct egress. **Risk:** direct egress is unverified until sanity confirms it — check per environment before go-live (see operating rule below) | new: `sender/GovNotifyConfig.java`, `src/main/resources/application.yaml` (`cp.notification.govnotify.proxy.*` — default off); legacy: `cpp-aks-deploy` `ansible/group_vars` (`gov.notify.proxy.*` + `outgoing.proxy.*`) |
 
 ## GOV.UK Notify status contract (basis for D3 — why the deviation is safe)
 
@@ -78,6 +79,22 @@ already complete before any of these statuses is returned. Defining in-progress 
 allow-list** also means any future/unknown Notify status fails safe (terminal) rather than
 re-polling forever.
 
+## GOV.UK Notify egress proxy — operating rule (basis for D6)
+
+The legacy per-environment proxy values (`gov.notify.proxy.*`, `outgoing.proxy.*`) are internal infra
+hostnames held in `cpp-aks-deploy` `ansible/group_vars` (the source of truth) — **not** duplicated in
+this repo (the org secrets scanner blocks internal URLs). The MbD service treats the proxy as an
+opt-in fallback:
+
+1. **Default off.** `application.yaml` defaults `cp.notification.govnotify.proxy.enabled=false` (host
+   empty, port `0`), so no overlay config is needed — the service connects to Notify directly.
+2. **Verify egress on onboarding.** Run the deployment sanity (`ng-asb-test.sh` roundtrip); a
+   successful send + terminal result event proves direct egress — keep the proxy off.
+3. **Enable only on failure.** If sanity fails because outbound 443 to `api.notifications.service.gov.uk`
+   is blocked, set `CP_NG_GOVNOTIFY_PROXY_ENABLED=true` with the `HOST`/`PORT` from `outgoing.proxy.*`
+   in `cpp-aks-deploy` (confirm with networking) in that stack's overlay and re-run sanity — per
+   environment, no image rebuild.
+
 ## Consequences
 
 - **D2 must be fixed** to restore parity — it is a regression, not an intended change. The in-task
@@ -92,6 +109,9 @@ re-polling forever.
   effective for terminal statuses.
 - **D1** is an accepted platform-level change; downstream integrators must move to the
   fire-and-forget + query-for-status model.
+- **D6** is a deliberate default (proxy off), not a dropped capability — the proxy is ported and
+  re-enablable per environment. Open item: egress verification per environment before go-live —
+  sanity confirms direct egress, or the proxy is enabled per the operating rule above.
 - New deviations discovered in later reviews should be appended as further rows rather than
   scattered across PR comments.
 
