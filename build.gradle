@@ -51,7 +51,7 @@ dependencies {
   testImplementation 'org.springframework.boot:spring-boot-restclient'
 
   // BDD / acceptance tests — plain Cucumber on JUnit Platform + Spring (no Serenity)
-  testImplementation platform('io.cucumber:cucumber-bom:7.34.7')
+  testImplementation platform('io.cucumber:cucumber-bom:7.34.8')
   testImplementation 'io.cucumber:cucumber-java'
   testImplementation 'io.cucumber:cucumber-junit-platform-engine'
   testImplementation 'io.cucumber:cucumber-spring'
