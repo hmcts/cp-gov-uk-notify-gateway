@@ -105,7 +105,7 @@ dependencies {
   // ASB emulator container needs an MSSQL backing store (see AbstractServiceBusIntegrationTest / README).
   testImplementation 'org.testcontainers:testcontainers-azure'
   testImplementation 'org.testcontainers:testcontainers-mssqlserver'
-  testRuntimeOnly 'com.microsoft.sqlserver:mssql-jdbc:13.4.0.jre11'
+  testRuntimeOnly 'com.microsoft.sqlserver:mssql-jdbc:13.6.0.jre11'
 
   // Gov.UK Notify HTTP boundary is stubbed with WireMock (standalone flavour = shaded Jetty, no clash
   // with the app's embedded Tomcat); Awaitility drives the async ASB/cp-task-manager assertions.
