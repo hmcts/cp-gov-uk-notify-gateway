@@ -84,7 +84,7 @@ dependencies {
 
   // Gov.UK Notify official client — same library and version as the legacy notification context;
   // owns the JWT auth, request payload serialisation, and response parsing (contract parity).
-  implementation 'uk.gov.service.notify:notifications-java-client:6.2.0-RELEASE'
+  implementation 'uk.gov.service.notify:notifications-java-client:6.2.1-RELEASE'
 
   // --- Azure integrations (NG-S02): ASB command consumer + Blob attachment download ---
   // Managed Identity in real envs (DefaultAzureCredential); connection-string only for emulator/local.
