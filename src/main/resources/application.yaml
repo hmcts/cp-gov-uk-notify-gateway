@@ -37,6 +37,8 @@ cp:
       # Fully-qualified namespace, e.g. my-namespace.servicebus.windows.net (Managed Identity path).
       namespace: ${CP_NG_SERVICEBUS_NAMESPACE:}
       command-queue: ${CP_NG_SERVICEBUS_COMMAND_QUEUE:ng-send-email}
+      # Messages processed in parallel per pod (legacy MDB maxSession=15).
+      max-concurrent-calls: ${CP_NG_SERVICEBUS_MAX_CONCURRENT_CALLS:15}
     blob:
       # Empty by default -> AttachmentDownloader uses DefaultAzureCredential (Workload Identity),
       # addressing the command's fileUri directly. Set the connection string only for Azurite/local

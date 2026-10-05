@@ -69,6 +69,24 @@ class NotificationRepositoryIntegrationTest {
             assertThat(reloaded.getClientContext()).isNull();
             assertThat(reloaded.getResultQueue()).isNull();
         }
+
+        @Test
+        void inserts_a_new_notification_once_and_ignores_a_duplicate() {
+            final UUID id = UUID.randomUUID();
+            final OffsetDateTime now = OffsetDateTime.now();
+
+            final int first = notifications.insertIfAbsent(id, "EMAIL", "QUEUED", "recipient@example.com",
+                    "mi-reportdata", "ng-result-mi-reportdata", now, now);
+            final int duplicate = notifications.insertIfAbsent(id, "EMAIL", "QUEUED", "other@example.com",
+                    "other", "other-queue", now, now);
+
+            assertThat(first).isEqualTo(1);
+            assertThat(duplicate).isZero();
+            final NotificationEntity reloaded = notifications.findById(id).orElseThrow();
+            assertThat(reloaded.getStatus()).isEqualTo("QUEUED");
+            assertThat(reloaded.getSendToAddress()).isEqualTo("recipient@example.com");
+            assertThat(reloaded.getResultQueue()).isEqualTo("ng-result-mi-reportdata");
+        }
     }
 
     @Nested
