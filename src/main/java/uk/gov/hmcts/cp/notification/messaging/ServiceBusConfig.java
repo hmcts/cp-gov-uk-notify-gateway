@@ -19,10 +19,13 @@ public class ServiceBusConfig {
             @Value("${cp.notification.servicebus.connection-string:}") final String connectionString,
             @Value("${cp.notification.servicebus.namespace:}") final String namespace,
             @Value("${cp.notification.servicebus.command-queue}") final String commandQueue,
+            @Value("${cp.notification.servicebus.max-concurrent-calls:15}") final int maxConcurrentCalls,
             final SendEmailConsumer consumer) {
         final ServiceBusProcessorClient client = authenticate(new ServiceBusClientBuilder(), connectionString, namespace)
                 .processor()
                 .queueName(commandQueue)
+                // SDK default is 1 (serial); 15 matches the legacy MDB maxSession.
+                .maxConcurrentCalls(maxConcurrentCalls)
                 .disableAutoComplete()
                 .processMessage(consumer::processMessage)
                 .processError(consumer::processError)

@@ -7,7 +7,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
-import uk.gov.hmcts.cp.notification.persistence.NotificationEntity;
 import uk.gov.hmcts.cp.notification.persistence.NotificationRepository;
 import uk.gov.hmcts.cp.notification.task.CpTaskFactory;
 import uk.gov.hmcts.cp.notification.task.SendEmailTask;
@@ -31,22 +30,16 @@ public class NotificationIngestionService {
 
     @Transactional
     public void ingest(final SendEmailCommand command, final String replyTo) {
-        if (notificationRepository.existsById(command.notificationId())) {
-            LOG.info("Duplicate notificationId {} — ignoring (no row, no task)", command.notificationId());
+        final OffsetDateTime now = clock.offsetDateTime();
+
+        // Only the delivery that wins the insert enqueues the send, so concurrent duplicates can't double-send.
+        final int inserted = notificationRepository.insertIfAbsent(
+                command.notificationId(), TYPE_EMAIL, STATUS_QUEUED, command.sendToAddress(),
+                command.clientContext(), replyTo, now, now);
+        if (inserted == 0) {
+            LOG.info("Duplicate notificationId {} — ignoring (row already exists, no task)", command.notificationId());
             return;
         }
-
-        final OffsetDateTime now = clock.offsetDateTime();
-        final NotificationEntity notification = new NotificationEntity();
-        notification.setNotificationId(command.notificationId());
-        notification.setNotificationType(TYPE_EMAIL);
-        notification.setStatus(STATUS_QUEUED);
-        notification.setSendToAddress(command.sendToAddress());
-        notification.setClientContext(command.clientContext());
-        notification.setResultQueue(replyTo);
-        notification.setCreatedAt(now);
-        notification.setUpdatedAt(now);
-        notificationRepository.save(notification);
 
         executionService.executeWith(taskFactory.createSendEmailJob(command));
         LOG.info("Queued notification {} and enqueued {} task", command.notificationId(), SendEmailTask.TASK_NAME);
