@@ -111,7 +111,7 @@ dependencies {
   // with the app's embedded Tomcat); Awaitility drives the async ASB/cp-task-manager assertions.
   testImplementation 'org.wiremock:wiremock-standalone:3.13.2'
   testImplementation 'org.awaitility:awaitility:4.3.0'
-  testImplementation 'net.javacrumbs.json-unit:json-unit-assertj:6.2.0'
+  testImplementation 'net.javacrumbs.json-unit:json-unit-assertj:6.3.0'
   // Pinned to 1.5.2: 3.x is a breaking API redesign (JsonSchemaFactory→SchemaRegistry,
   // JsonSchema→Schema, ValidationMessage→Error, SpecVersion→SpecificationVersion). ContractSchema
   // targets the 1.5.x API. See dependabot ignore for semver-major on this artifact.
