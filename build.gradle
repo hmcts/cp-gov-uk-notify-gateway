@@ -5,8 +5,8 @@ plugins {
   id 'io.spring.dependency-management' version '1.1.7'
   id 'jacoco'
   id 'maven-publish'
-  id 'com.github.ben-manes.versions' version '0.64.0'
-  id 'org.cyclonedx.bom' version '3.4.1'
+  id 'com.github.ben-manes.versions' version '0.65.0'
+  id 'org.cyclonedx.bom' version '3.5.1'
   id 'com.gorylenko.gradle-git-properties' version '4.0.1'
 }
 
@@ -88,8 +88,8 @@ dependencies {
 
   // --- Azure integrations (NG-S02): ASB command consumer + Blob attachment download ---
   // Managed Identity in real envs (DefaultAzureCredential); connection-string only for emulator/local.
-  implementation 'com.azure:azure-messaging-servicebus:7.18.0'
-  implementation 'com.azure:azure-storage-blob:12.35.1'
+  implementation 'com.azure:azure-messaging-servicebus:7.18.1'
+  implementation 'com.azure:azure-storage-blob:12.36.0'
   implementation 'com.azure:azure-identity:1.18.7'
 
   // --- Integration testing: Postgres via Testcontainers ---
