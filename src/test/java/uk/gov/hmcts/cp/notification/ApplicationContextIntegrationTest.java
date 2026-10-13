@@ -1,7 +1,10 @@
 package uk.gov.hmcts.cp.notification;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.context.ApplicationContext;
@@ -9,11 +12,14 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 import uk.gov.hmcts.cp.notification.integration.base.AbstractEndToEndIntegrationTest;
+import uk.gov.hmcts.cp.notification.integration.repository.NotificationTestRepository;
+import uk.gov.hmcts.cp.notification.persistence.NotificationEntity;
 
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static uk.gov.hmcts.cp.notification.integration.testdata.NotificationEntityFactory.aNotificationEntity;
 
 class ApplicationContextIntegrationTest extends AbstractEndToEndIntegrationTest {
     @Autowired
@@ -21,6 +27,9 @@ class ApplicationContextIntegrationTest extends AbstractEndToEndIntegrationTest 
 
     @Autowired
     private TestRestTemplate restTemplate;
+
+    @Autowired
+    private NotificationTestRepository notifications;
 
     @Test
     void the_application_context_loads() {
@@ -61,6 +70,71 @@ class ApplicationContextIntegrationTest extends AbstractEndToEndIntegrationTest 
             assertThat(git).isNotNull();
             assertThat(git.get("branch")).isNotNull();
             assertThat((Map<String, Object>) git.get("commit")).containsKeys("id", "time");
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"/actuator/health/liveness", "/actuator/health/readiness"})
+        @SuppressWarnings("unchecked")
+        void probe_reports_up(final String probe) {
+            final ResponseEntity<Map> response = restTemplate.getForEntity(probe, Map.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(response.getBody()).containsEntry("status", "UP");
+        }
+    }
+
+    @Nested
+    class RefusedRequests {
+
+        @Test
+        void a_path_outside_the_actuator_endpoints_is_forbidden() {
+            final ResponseEntity<String> response = restTemplate.getForEntity("/anything-else", String.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        }
+    }
+
+    @Nested
+    class RemovedNotificationQueries {
+
+        @AfterEach
+        void cleanUp() {
+            notifications.deleteAll();
+        }
+
+        @Test
+        void looking_up_a_recorded_notification_by_id_is_refused_without_returning_it() {
+            final NotificationEntity recorded = notifications.save(aNotificationEntity()
+                    .sendToAddress("recipient@example.com")
+                    .build());
+
+            final ResponseEntity<String> response = restTemplate.getForEntity(
+                    "/notifications/{id}", String.class, recorded.getNotificationId());
+
+            assertRefusedWithoutNotificationData(response, recorded);
+        }
+
+        @Test
+        void searching_notifications_is_refused_without_returning_any() {
+            final NotificationEntity recorded = notifications.save(aNotificationEntity()
+                    .sendToAddress("recipient@example.com")
+                    .build());
+
+            final ResponseEntity<String> response = restTemplate.getForEntity(
+                    "/notifications?status={status}", String.class, recorded.getStatus());
+
+            assertRefusedWithoutNotificationData(response, recorded);
+        }
+
+        private void assertRefusedWithoutNotificationData(
+                final ResponseEntity<String> response, final NotificationEntity recorded) {
+            assertThat(response.getStatusCode().value()).isIn(401, 403, 404);
+            assertThat(response.getBody())
+                    .satisfiesAnyOf(
+                            body -> assertThat(body).isNull(),
+                            body -> assertThat(body)
+                                    .doesNotContain(recorded.getNotificationId().toString())
+                                    .doesNotContain(recorded.getSendToAddress()));
         }
     }
 }

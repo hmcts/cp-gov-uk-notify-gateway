@@ -43,7 +43,7 @@ identity/RBAC, provisioning, deploy — NG-S05/07/08/09) carry no behavioural-pa
 | FR-006 | cp-task-manager retry/poll timings preserved | [NG-S02](./NG-S02.md) | AC-013 | |
 | FR-007 | ReplyTo-gated result publish | [NG-S03](./NG-S03.md) | AC-014, AC-015 | Split from core send — separable value, independently testable via synthetic `ReplyTo` message |
 | FR-008 | Result-event contract parity (golden master) | [NG-S03](./NG-S03.md) | AC-016 | |
-| FR-009 | Query API returns all columns | [NG-S04](./NG-S04.md) | AC-017, AC-018 | Read API only; auth sliced to NG-S14 (see FR-024 row) |
+| FR-009 | Query API returns all columns | [NG-S04](./NG-S04.md) | AC-017, AC-018 | **Superseded by ADR-002 D7 (query API removed).** Read API only; auth sliced to NG-S14 (see FR-024 row) |
 | FR-010 | Integration test harness (Testcontainers/ASB emulator/Azurite/WireMock/Awaitility) | *(no dedicated story — folded into DoD, per coordinator decision)* | AC-019 | **Covered via DoD across [NG-S02](./NG-S02.md) (happy path, atomicity, blob 403/404), [NG-S03](./NG-S03.md) (result-queue message), [NG-S10](./NG-S10.md) (O365 stub), [NG-S11](./NG-S11.md) (retry), [NG-S12](./NG-S12.md) (redelivery/idempotency)** — not orphaned |
 | FR-011 | CI validation pipeline (GitHub Actions) | [NG-S05](./NG-S05.md) | AC-020 | |
 | FR-012 | STE simulator/stub routing (Gov.Notify + O365) | [NG-S06](./NG-S06.md) | AC-021 | |
@@ -58,7 +58,7 @@ identity/RBAC, provisioning, deploy — NG-S05/07/08/09) carry no behavioural-pa
 | FR-021 | *(removed by Stage 2 — dual-write atomicity resolved by co-located transaction; no reconciliation sweep needed)* | — | — | Not carried into Stage 3 |
 | FR-022 | At-least-once safety: state guard + Gov.Notify recover-by-reference | [NG-S12](./NG-S12.md) | AC-035, AC-036 | Distinct from FR-020 — prevents *double-acting* on retries |
 | FR-023 | Observability: logs, metrics, DLQ-depth | [NG-S13](./NG-S13.md) | AC-037, AC-038 | |
-| FR-024 | Secure query API with IDAM auth | [NG-S14](./NG-S14.md) | AC-039 | Sliced out of NG-S04 — auth pattern is an open ADR (Pattern 1 vs Pattern 2, see `pending/query-api-authentication.md`) |
+| FR-024 | Secure query API with IDAM auth | [NG-S14](./NG-S14.md) | AC-039 | **Superseded by ADR-002 D7 (query API removed).** Sliced out of NG-S04 — auth pattern was an open ADR (Pattern 1 vs Pattern 2; query-API authentication note retired — see ADR-002 D7) |
 
 **Coverage check:** every FR-001…FR-024 (FR-021 removed by Stage 2) lands in exactly one story.
 Every AC-001…AC-039 in `requirements.md` (AC-034 does not exist — no FR/AC gap, just an unused number)
@@ -99,7 +99,7 @@ NG-S12 (see mapping table above).
   network-boundary security, no in-service token validation) vs. Pattern 2 (Spring Security OAuth2
   resource server against Entra ID, genuine cryptographic JWT validation, the sanctioned
   `cpp-mbd-notification-svc-pilot` blueprint). Genuinely open — no platform-sanctioned winner; full
-  analysis in `docs/pipeline/pending/query-api-authentication.md`. An ADR is required before
+  analysis in the query-API authentication note (retired — see ADR-002 D7). An ADR is required before
   implementation begins.
 
 ## Open / blocked items

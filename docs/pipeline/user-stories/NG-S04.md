@@ -1,5 +1,8 @@
 # [NG-S04] Read-only query API for notification status (open interim — auth deferred to NG-S14)
 
+> **Superseded by ADR-002 D7 (query API removed).** The notification query API this story covers was removed
+> by [ADR-002 D7](../adrs/002-deviations-from-legacy-notify-context.md); the story is kept for history only.
+
 ## User story
 As a **support/operations engineer (or an authenticated machine consumer once NG-S14 lands)**,
 I want **to query a notification's full record via a read-only REST API**,
@@ -21,8 +24,7 @@ rejected in favour of an open one. **Risk accepted:** because responses carry OF
 window — this consciously reverses the earlier "no story ships an unauthenticated PII endpoint" rule for
 NG-S04. **Mitigation (mandatory):** NG-S04 must remain reachable only within the trusted cluster/network
 boundary (internal ingress, not a public/unauthenticated route), and **NG-S14 must land before any
-external exposure**. See `docs/pipeline/pending/query-api-implementation.md` and
-`docs/pipeline/pending/query-api-authentication.md`.
+external exposure**. See the query-API implementation and authentication notes (retired — see ADR-002 D7).
 
 ## Acceptance criteria
 - [ ] AC-017: Given a persisted notification, when the read API is queried by id
@@ -78,7 +80,7 @@ external exposure**. See `docs/pipeline/pending/query-api-implementation.md` and
   NG-S14 (see `_index.md`'s FR→Story mapping) — it no longer belongs to this story.
 - **Implementation approach:** hand-written controller + local `NotificationView` DTO (Option B) — no
   companion `api-notification-gateway` spec / generated interface for now; contract-first migration is
-  tracked as follow-up debt in `docs/pipeline/pending/query-api-implementation.md`.
+  tracked as follow-up debt in the query-API implementation note (retired — see ADR-002 D7).
 - **Jira story ticket:** [PEG-3383](https://tools.hmcts.net/jira/browse/PEG-3383).
 - Depends on NG-S01 (schema) only; does not require NG-S02/NG-S03 to be complete (can be tested with
   seeded rows), though it has no real data to show until NG-S02 lands.

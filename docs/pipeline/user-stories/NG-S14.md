@@ -1,5 +1,8 @@
 # [NG-S14] Authentication and authorisation of the notification query API
 
+> **Superseded by ADR-002 D7 (query API removed).** The notification query API this story covers was removed
+> by [ADR-002 D7](../adrs/002-deviations-from-legacy-notify-context.md); the story is kept for history only.
+
 ## User story
 As a **support/operations engineer (or an authenticated machine consumer)**,
 I want **the notification query API (delivered deny-all-by-default in NG-S04) to authenticate and
@@ -14,7 +17,7 @@ story. **Depends on NG-S04**: the endpoint must exist (deployed deny-all-by-defa
 secured with a real auth pattern.
 
 The choice of auth pattern is **not yet decided**. Two candidates are analysed in
-`docs/pipeline/pending/query-api-authentication.md`:
+the query-API authentication note (retired — see ADR-002 D7):
 - **Pattern 1** — `cp-auth-rules-filter` header-trust (`CJSCPPUID` injected by the fronting IDAM
   gateway, U&G permissions + Drools rules); security rests on the network boundary, no in-service
   cryptographic token validation.
@@ -58,7 +61,7 @@ chosen pattern **MUST be raised and agreed before implementation begins**.
 ## Notes / open questions
 - **FR/AC traceability:** FR-024 → AC-039 (sliced out of NG-S04, where it was originally bundled with
   FR-009 per the earlier Q3 carry-forward).
-- **Auth pattern decision is open** — see `docs/pipeline/pending/query-api-authentication.md` §7, which
+- **Auth pattern decision is open** — see the query-API authentication note §7 (retired — see ADR-002 D7), which
   gates the ADR on:
   1. **Exposure** — is the read API behind the fronting IDAM gateway (like court-list), or a standalone
      ingress reachable by machine consumers? Decides Pattern 1 vs 2 more than anything else.

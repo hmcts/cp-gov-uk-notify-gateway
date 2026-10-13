@@ -7,13 +7,13 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 
-// Interim posture (NG-S04): the read-only query API is served open (unauthenticated) in every profile.
-// Authentication/authorisation is delivered by NG-S14, which replaces this permit-all chain.
+// The gateway has no business HTTP surface: commands arrive on Azure Service Bus and outcomes leave as
+// result events. The notification query API was removed (ADR-002 D7), so HTTP is deny-by-default and only
+// the actuator probe, info and metrics endpoints are reachable. Any endpoint added later is refused
+// until it is explicitly permitted here with its own authentication decision.
 //
-// CSRF is left at Spring Security's default (enabled). The only HTTP surface today is GET query endpoints,
-// which CSRF never guards, so this has no functional effect now. When a state-changing (POST/PUT/DELETE)
-// endpoint is introduced it must configure CSRF explicitly — a stateless service needs a non-session token
-// strategy (e.g. CookieCsrfTokenRepository) or an explicit ignore for header-token-authenticated routes.
+// CSRF is left at Spring Security's default (enabled). Nothing state-changing is served; a future
+// state-changing endpoint must configure CSRF explicitly for this stateless service.
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
@@ -22,7 +22,9 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(final HttpSecurity http) throws Exception {
         return http
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(requests -> requests.anyRequest().permitAll())
+                .authorizeHttpRequests(requests -> requests
+                        .requestMatchers("/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
+                        .anyRequest().denyAll())
                 .build();
     }
 }
