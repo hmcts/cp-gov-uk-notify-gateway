@@ -32,3 +32,5 @@ services:
       # non-functional Gov.Notify TEST-key placeholder so the app starts for local runs and the DAST
       # scan; no real notifications are sent (no Service Bus is wired here). Real keys come from Key Vault.
       CP_NG_GOVNOTIFY_API_KEY: cpngtest-00000000-0000-0000-0000-000000000000-11111111-1111-1111-1111-111111111111
+      CP_NG_SYSTEM_USER_ID: 0f0e0d0c-0b0a-4908-8706-050403020100
+      CP_NG_MATERIAL_BASE_URL: http://material-service-stub/material-service
