@@ -35,7 +35,7 @@ public class NotificationIngestionService {
         // Only the delivery that wins the insert enqueues the send, so concurrent duplicates can't double-send.
         final int inserted = notificationRepository.insertIfAbsent(
                 command.notificationId(), TYPE_EMAIL, STATUS_QUEUED, command.sendToAddress(),
-                command.clientContext(), replyTo, now, now);
+                command.clientContext(), replyTo, command.materialUrl(), now, now);
         if (inserted == 0) {
             LOG.info("Duplicate notificationId {} — ignoring (row already exists, no task)", command.notificationId());
             return;

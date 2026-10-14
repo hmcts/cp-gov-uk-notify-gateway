@@ -261,11 +261,9 @@ Provenance = retained from legacy `notificationnotify.command.send-email-notific
 
 Required set (`notificationId`, `templateId`, `sendToAddress`) and `additionalProperties: false` are legacy-faithful.
 
-> **Out of scope for MVP — legacy `materialUrl`:** the legacy command carried a second, higher-priority
-> attachment source `materialUrl` (a URL downloaded via DocumentDownload). The MVP serves the MI-report
-> (`mi-reportdata`) originator, which only ever sets `fileId` (→ `fileUri`), so `materialUrl` is dropped.
-> It remains a live field for other originators (results, subscriptions, staging-dvla); reinstate it as a
-> URL-download attachment source (priority over `fileUri`) when the gateway onboards those producers.
+> **`materialUrl` is supported** (optional string, as in legacy): the gateway fetches the document through
+> the Material service and attaches it. A non-blank `materialUrl` wins over `fileUri`; a blank one counts as
+> absent. See ADR-002 D4 and D8–D11.
 
 > **Transport property — not a body field:** the ASB `ReplyTo` message property (result-event routing,
 > FR-007) is **not** part of the command body. It is captured at ingest into the `notification.result_queue`

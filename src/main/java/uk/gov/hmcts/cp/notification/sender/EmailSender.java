@@ -15,14 +15,14 @@ public class EmailSender {
 
     private final EmailClientFactory emailClientFactory;
 
-    public SendResult sendEmail(final SendEmailCommand command, final byte[] attachment) {
+    public SendResult sendEmail(final SendEmailCommand command, final Attachment attachment) {
         final SendEmailRequest request = new SendEmailRequest(
                 command.notificationId(),
                 command.templateId(),
                 command.sendToAddress(),
                 command.personalisation(),
-                attachment,
-                attachment == null ? null : filenameFrom(command.fileUri()),
+                attachment == null ? null : attachment.content(),
+                attachmentFilename(command, attachment),
                 command.replyToAddress(),
                 command.replyToAddressId());
 
@@ -31,6 +31,14 @@ public class EmailSender {
         LOG.info("Sent notification {} via {} (reference {})",
                 command.notificationId(), client.getClass().getSimpleName(), result.reference());
         return result;
+    }
+
+    private static String attachmentFilename(final SendEmailCommand command, final Attachment attachment) {
+        String filename = null;
+        if (attachment != null) {
+            filename = attachment.filename() == null ? filenameFrom(command.fileUri()) : attachment.filename();
+        }
+        return filename;
     }
 
     private static String filenameFrom(final String fileUri) {

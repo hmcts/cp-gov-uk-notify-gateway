@@ -19,6 +19,8 @@ public record SendEmailCommand(
 
         String fileUri,
 
+        String materialUrl,
+
         @Email String replyToAddress,
 
         UUID replyToAddressId,

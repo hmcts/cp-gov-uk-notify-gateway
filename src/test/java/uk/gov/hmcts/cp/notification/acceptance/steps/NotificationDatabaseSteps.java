@@ -18,6 +18,15 @@ public class NotificationDatabaseSteps {
     @Autowired
     private NotificationTestRepository notifications;
 
+    @Then("the Material document link is recorded on the notification")
+    public void the_material_document_link_is_recorded_on_the_notification() {
+        final String notificationId = context.getNotificationId();
+        final String materialUrl = context.getMaterialUrl();
+        await().atMost(ofSeconds(60)).untilAsserted(() ->
+                assertThat(notifications.findById(fromString(notificationId)))
+                        .hasValueSatisfying(row -> assertThat(row.getMaterialUrl()).isEqualTo(materialUrl)));
+    }
+
     @Then("the notification is recorded as {word}")
     public void the_notification_is_recorded_as(final String status) {
         final String notificationId = context.getNotificationId();

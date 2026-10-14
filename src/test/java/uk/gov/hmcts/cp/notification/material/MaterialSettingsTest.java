@@ -31,7 +31,9 @@ class MaterialSettingsTest {
             contextRunner
                     .withPropertyValues("cp.notification.material.base-url=" + BASE_URL)
                     .run(context -> assertThat(context).getFailure()
-                            .rootCause().hasMessageContaining("CP_NG_SYSTEM_USER_ID"));
+                            .rootCause()
+                            .isInstanceOf(InvalidMaterialSettingsException.class)
+                            .hasMessageContaining("CP_NG_SYSTEM_USER_ID"));
         }
 
         @Test
@@ -41,7 +43,9 @@ class MaterialSettingsTest {
                             "cp.notification.material.system-user-id=  ",
                             "cp.notification.material.base-url=" + BASE_URL)
                     .run(context -> assertThat(context).getFailure()
-                            .rootCause().hasMessageContaining("CP_NG_SYSTEM_USER_ID"));
+                            .rootCause()
+                            .isInstanceOf(InvalidMaterialSettingsException.class)
+                            .hasMessageContaining("CP_NG_SYSTEM_USER_ID"));
         }
 
         @ParameterizedTest
@@ -53,6 +57,7 @@ class MaterialSettingsTest {
                             "cp.notification.material.base-url=" + BASE_URL)
                     .run(context -> assertThat(context).getFailure()
                             .rootCause()
+                            .isInstanceOf(InvalidMaterialSettingsException.class)
                             .hasMessageContaining("CP_NG_SYSTEM_USER_ID")
                             .satisfies(cause -> assertThat(cause.getMessage()).doesNotContain(value)));
         }
@@ -66,7 +71,9 @@ class MaterialSettingsTest {
             contextRunner
                     .withPropertyValues("cp.notification.material.system-user-id=" + SYSTEM_USER_ID)
                     .run(context -> assertThat(context).getFailure()
-                            .rootCause().hasMessageContaining("CP_NG_MATERIAL_BASE_URL"));
+                            .rootCause()
+                            .isInstanceOf(InvalidMaterialSettingsException.class)
+                            .hasMessageContaining("CP_NG_MATERIAL_BASE_URL"));
         }
 
         @ParameterizedTest
@@ -79,8 +86,29 @@ class MaterialSettingsTest {
                             "cp.notification.material.base-url=" + value)
                     .run(context -> assertThat(context).getFailure()
                             .rootCause()
+                            .isInstanceOf(InvalidMaterialSettingsException.class)
                             .hasMessageContaining("CP_NG_MATERIAL_BASE_URL")
                             .satisfies(cause -> assertThat(cause.getMessage()).doesNotContain(value)));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {
+                "http://material-service.example.internal/material-service?tenant=x",
+                "http://material-service.example.internal/material-service#fragment",
+                "http://svc-user:svc-secret@material-service.example.internal/material-service"})
+        void should_fail_to_start_without_revealing_the_value_when_the_base_url_has_a_query_fragment_or_user_info(
+                final String value) {
+            contextRunner
+                    .withPropertyValues(
+                            "cp.notification.material.system-user-id=" + SYSTEM_USER_ID,
+                            "cp.notification.material.base-url=" + value)
+                    .run(context -> assertThat(context).getFailure()
+                            .rootCause()
+                            .isInstanceOf(InvalidMaterialSettingsException.class)
+                            .hasMessageContaining("CP_NG_MATERIAL_BASE_URL")
+                            .satisfies(cause -> assertThat(cause.getMessage())
+                                    .doesNotContain(value)
+                                    .doesNotContain("svc-secret")));
         }
     }
 
@@ -100,7 +128,6 @@ class MaterialSettingsTest {
                         assertThat(settings.baseUrl()).isEqualTo(URI.create(BASE_URL));
                         assertThat(settings.connectTimeout()).isEqualTo(Duration.ofSeconds(5));
                         assertThat(settings.readTimeout()).isEqualTo(Duration.ofSeconds(35));
-                        assertThat(settings.sasConnectTimeout()).isEqualTo(Duration.ofSeconds(5));
                         assertThat(settings.sasReadTimeout()).isEqualTo(Duration.ofSeconds(30));
                         assertThat(settings.toString()).doesNotContain(SYSTEM_USER_ID).doesNotContain(BASE_URL);
                         assertThat(context.getBean(MaterialProperties.class).toString())
@@ -118,13 +145,11 @@ class MaterialSettingsTest {
                             "cp.notification.material.base-url=" + BASE_URL,
                             "cp.notification.material.connect-timeout=2s",
                             "cp.notification.material.read-timeout=60s",
-                            "cp.notification.material.sas-connect-timeout=3s",
                             "cp.notification.material.sas-read-timeout=45s")
                     .run(context -> {
                         final MaterialSettings settings = context.getBean(MaterialSettings.class);
                         assertThat(settings.connectTimeout()).isEqualTo(Duration.ofSeconds(2));
                         assertThat(settings.readTimeout()).isEqualTo(Duration.ofSeconds(60));
-                        assertThat(settings.sasConnectTimeout()).isEqualTo(Duration.ofSeconds(3));
                         assertThat(settings.sasReadTimeout()).isEqualTo(Duration.ofSeconds(45));
                     });
         }

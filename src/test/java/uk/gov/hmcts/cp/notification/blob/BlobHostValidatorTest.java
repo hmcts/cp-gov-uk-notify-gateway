@@ -8,7 +8,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 class BlobHostValidatorTest {
-    private static final String ALLOWED_HOST = "sastefilestore.blob.core.windows.net";
+    private static final String ALLOWED_HOST = "examplefilestore.blob.core.windows.net";
 
     @Test
     void allows_an_https_uri_whose_host_is_in_the_allow_list() {
@@ -21,7 +21,7 @@ class BlobHostValidatorTest {
     void matches_the_host_case_insensitively() {
         final BlobHostValidator validator = new BlobHostValidator(List.of(ALLOWED_HOST));
 
-        assertThatCode(() -> validator.validate("https", "SaSteFileStore.Blob.Core.Windows.Net"))
+        assertThatCode(() -> validator.validate("https", "ExampleFileStore.Blob.Core.Windows.Net"))
                 .doesNotThrowAnyException();
     }
 

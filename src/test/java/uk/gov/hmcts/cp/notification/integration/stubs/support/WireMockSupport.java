@@ -1,7 +1,6 @@
 package uk.gov.hmcts.cp.notification.integration.stubs.support;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
-import uk.gov.hmcts.cp.notification.integration.stubs.GovUkNotifyStubService;
 
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 

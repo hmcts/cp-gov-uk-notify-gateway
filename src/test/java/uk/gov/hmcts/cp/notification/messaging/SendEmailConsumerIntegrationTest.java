@@ -34,7 +34,9 @@ import static uk.gov.hmcts.cp.notification.integration.Fixtures.load;
 import static uk.gov.hmcts.cp.notification.integration.stubs.ASBTestClient.anAsbTestClient;
 import static uk.gov.hmcts.cp.notification.integration.stubs.support.ContractSchema.SEND_EMAIL_COMMAND;
 import static uk.gov.hmcts.cp.notification.integration.stubs.support.ContractSchema.assertConformsTo;
+import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.MATERIAL_URL;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.aSendEmailCommand;
+import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.aSendEmailCommandWithMaterialUrl;
 
 @SpringBootTest(classes = AsbConsumerSliceConfig.class)
 @ActiveProfiles("test")
@@ -76,6 +78,18 @@ class SendEmailConsumerIntegrationTest {
             assertThat(command.getValue().notificationId()).isEqualTo(id);
             assertThat(command.getValue().sendToAddress()).isEqualTo("user@example.com");
             assertThat(command.getValue().clientContext()).isEqualTo("mi-reportdata");
+        }
+
+        @Test
+        void delegates_a_command_carrying_a_material_url_with_the_link_intact() {
+            final UUID id = UUID.randomUUID();
+
+            asb.sendToCommandQueue(aSendEmailCommandWithMaterialUrl().notificationId(id).build());
+
+            final ArgumentCaptor<SendEmailCommand> command = ArgumentCaptor.forClass(SendEmailCommand.class);
+            verify(ingestionService, timeout(TIMEOUT.toMillis())).ingest(command.capture(), isNull());
+            assertThat(command.getValue().notificationId()).isEqualTo(id);
+            assertThat(command.getValue().materialUrl()).isEqualTo(MATERIAL_URL);
         }
 
         @Test
@@ -137,11 +151,23 @@ class SendEmailConsumerIntegrationTest {
             assertConformsTo(SEND_EMAIL_COMMAND, load("fixtures/commands/send-email-missing-attachment.json", fixturePlaceHolders()));
         }
 
+        @Test
+        void the_command_fixture_with_a_material_url_conforms_to_the_published_contract() {
+            assertConformsTo(SEND_EMAIL_COMMAND, load("fixtures/commands/send-email-with-material-url.json", fixturePlaceHolders()));
+        }
+
+        @Test
+        void the_command_fixture_with_a_material_url_and_an_attachment_conforms_to_the_published_contract() {
+            assertConformsTo(SEND_EMAIL_COMMAND,
+                    load("fixtures/commands/send-email-with-material-url-and-attachment.json", fixturePlaceHolders()));
+        }
+
         private Map<String, String> fixturePlaceHolders() {
             return of(
                     "notificationId", UUID.randomUUID().toString(),
                     "templateId", UUID.randomUUID().toString(),
-                    "fileUri", "https://sastefilestore.blob.core.windows.net/steccm13/report.csv");
+                    "fileUri", "https://examplefilestore.blob.core.windows.net/example-container/report.csv",
+                    "materialUrl", MATERIAL_URL);
         }
     }
 }

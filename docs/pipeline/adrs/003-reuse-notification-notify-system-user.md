@@ -1,8 +1,7 @@
 # ADR 003 — The gateway calls Material as the notification-notify system user
 
 > Repo ADR-003 = KB ADR-001 (`cp-meta-arch` change `2026-10-notify-gateway-material-url`,
-> `adrs/001-reuse-notification-notify-system-user.md`; copy in
-> `docs/pipeline/workorders/2026-10-notify-gateway-material-url/adrs/`). Renumbered because this repo
+> `adrs/001-reuse-notification-notify-system-user.md`). Renumbered because this repo
 > already has ADR-001/002. References inside this ADR to `current-state.md`, `platform/security.md`,
 > `gap:` ids and the delivery plan are to that KB change, not to this repo.
 

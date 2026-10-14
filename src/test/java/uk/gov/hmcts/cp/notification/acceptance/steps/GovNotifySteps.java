@@ -34,6 +34,17 @@ public class GovNotifySteps {
                 .untilAsserted(() -> govUkNotify.sendEmailRequestMatches(expectedRequest, attachmentBytes));
     }
 
+    @Then("the email is sent via the Gov.UK Notify provider with the Material document attached")
+    public void the_email_is_sent_via_the_gov_uk_notify_provider_with_the_material_document_attached() {
+        final String expectedRequest = load("fixtures/gov-notify/expected-send-email-request-with-material-document.json", of(
+                "templateId", context.getTemplateId(),
+                "notificationId", context.getNotificationId(),
+                "filename", context.getAttachmentFilename()));
+        final byte[] document = context.getAttachmentBytes();
+        await().atMost(ofSeconds(60))
+                .untilAsserted(() -> govUkNotify.sendEmailRequestMatches(expectedRequest, document));
+    }
+
     @Then("the delivery status is polled from the provider")
     public void the_delivery_status_is_polled_from_the_provider() {
         final String externalReference = context.getExternalReference();

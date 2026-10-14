@@ -15,6 +15,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static uk.gov.hmcts.cp.notification.integration.testdata.AttachmentFactory.MATERIAL_DOCUMENT_FILENAME;
+import static uk.gov.hmcts.cp.notification.integration.testdata.AttachmentFactory.aFileAttachment;
+import static uk.gov.hmcts.cp.notification.integration.testdata.AttachmentFactory.aMaterialDocumentAttachment;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.aSendEmailCommand;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendResultFactory.aSendResult;
 
@@ -40,7 +43,8 @@ class EmailSenderTest {
         when(emailClient.send(any(SendEmailRequest.class))).thenReturn(aSendResult().reference("ref-1").build());
 
         final SendResult result = emailSender.sendEmail(
-                aSendEmailCommand().notificationId(id).sendToAddress("user@example.com").build(), attachment);
+                aSendEmailCommand().notificationId(id).sendToAddress("user@example.com").build(),
+                aFileAttachment(attachment));
 
         verify(senderFactory).selectFor(requestCaptor.capture());
         assertThat(requestCaptor.getValue().notificationId()).isEqualTo(id);
@@ -59,6 +63,19 @@ class EmailSenderTest {
 
         verify(senderFactory).selectFor(requestCaptor.capture());
         assertThat(requestCaptor.getValue().attachment()).isNull();
+    }
+
+    @Test
+    void uses_the_filename_reported_by_the_download_rather_than_deriving_one_from_the_file_uri() {
+        stubClient();
+        final Attachment document = aMaterialDocumentAttachment();
+
+        emailSender.sendEmail(aSendEmailCommand().fileUri(
+                "https://sa.blob.core.windows.net/mi-reportdata/report.csv").build(), document);
+
+        verify(senderFactory).selectFor(requestCaptor.capture());
+        assertThat(requestCaptor.getValue().attachment()).isEqualTo(document.content());
+        assertThat(requestCaptor.getValue().attachmentFilename()).isEqualTo(MATERIAL_DOCUMENT_FILENAME);
     }
 
     @Test
@@ -132,7 +149,7 @@ class EmailSenderTest {
         when(emailClient.send(any(SendEmailRequest.class))).thenReturn(aSendResult().build());
     }
 
-    private static byte[] someAttachment() {
-        return "report".getBytes(StandardCharsets.UTF_8);
+    private static Attachment someAttachment() {
+        return aFileAttachment();
     }
 }

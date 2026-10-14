@@ -11,6 +11,8 @@ import tools.jackson.databind.ObjectMapper;
 import uk.gov.hmcts.cp.notification.blob.AttachmentDownloader;
 import uk.gov.hmcts.cp.notification.blob.PermanentBlobException;
 import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
+import uk.gov.hmcts.cp.notification.material.MaterialAttachmentDownloader;
+import uk.gov.hmcts.cp.notification.sender.Attachment;
 import uk.gov.hmcts.cp.notification.sender.EmailSender;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyFailureClassifier;
@@ -34,6 +36,7 @@ public class SendEmailTask implements ExecutableTask {
     private static final Logger LOG = LoggerFactory.getLogger(SendEmailTask.class);
 
     private final AttachmentDownloader attachmentDownloader;
+    private final MaterialAttachmentDownloader materialAttachmentDownloader;
     private final EmailSender emailSender;
     private final TransientFailurePolicy failurePolicy;
     private final ExecutionService executionService;
@@ -43,6 +46,7 @@ public class SendEmailTask implements ExecutableTask {
 
     public SendEmailTask(
             final AttachmentDownloader attachmentDownloader,
+            final MaterialAttachmentDownloader materialAttachmentDownloader,
             final EmailSender emailSender,
             final TransientFailurePolicy failurePolicy,
             final ExecutionService executionService,
@@ -50,6 +54,7 @@ public class SendEmailTask implements ExecutableTask {
             final CpTaskFactory taskFactory,
             @Value("${cp.notification.retry.email-durations-secs}") final List<Long> retryDurationsSecs) {
         this.attachmentDownloader = attachmentDownloader;
+        this.materialAttachmentDownloader = materialAttachmentDownloader;
         this.emailSender = emailSender;
         this.failurePolicy = failurePolicy;
         this.executionService = executionService;
@@ -76,17 +81,19 @@ public class SendEmailTask implements ExecutableTask {
         return result;
     }
 
-    @SuppressWarnings("PMD.ReturnEmptyCollectionRatherThanNull")
-    private byte[] downloadAttachment(final SendEmailCommand command) {
-        byte[] attachment = null;
-        if (StringUtils.hasText(command.fileUri())) {
-            attachment = attachmentDownloader.download(command.fileUri());
+    // Precedence (legacy parity): a non-blank materialUrl wins over fileUri; a blank one counts as absent.
+    private Attachment downloadAttachment(final SendEmailCommand command) {
+        Attachment attachment = null;
+        if (StringUtils.hasText(command.materialUrl())) {
+            attachment = materialAttachmentDownloader.download(command.materialUrl(), command.notificationId());
+        } else if (StringUtils.hasText(command.fileUri())) {
+            attachment = Attachment.withoutFilename(attachmentDownloader.download(command.fileUri()));
         }
         return attachment;
     }
 
     private ExecutionInfo send(
-            final SendEmailCommand command, final byte[] attachment, final ExecutionInfo executionInfo) {
+            final SendEmailCommand command, final Attachment attachment, final ExecutionInfo executionInfo) {
         ExecutionInfo result;
         try {
             final SendResult sendResult = emailSender.sendEmail(command, attachment);
