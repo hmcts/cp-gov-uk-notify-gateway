@@ -3,8 +3,6 @@ package uk.gov.hmcts.cp.notification.acceptance.steps;
 import io.cucumber.spring.ScenarioScope;
 import org.springframework.stereotype.Component;
 
-import java.time.OffsetDateTime;
-
 @Component
 @ScenarioScope
 public class ScenarioContext {
@@ -15,9 +13,6 @@ public class ScenarioContext {
     private String commandJson;
     private String replyQueue;
     private byte[] attachmentBytes;
-    private String recordedStatus;
-    private OffsetDateTime recordedCreatedAt;
-    private String lastResponseBody;
 
     public String getNotificationId() {
         return notificationId;
@@ -65,29 +60,5 @@ public class ScenarioContext {
 
     public void setAttachmentBytes(final byte[] attachmentBytes) {
         this.attachmentBytes = attachmentBytes;
-    }
-
-    public String getRecordedStatus() {
-        return recordedStatus;
-    }
-
-    public void setRecordedStatus(final String recordedStatus) {
-        this.recordedStatus = recordedStatus;
-    }
-
-    public OffsetDateTime getRecordedCreatedAt() {
-        return recordedCreatedAt;
-    }
-
-    public void setRecordedCreatedAt(final OffsetDateTime recordedCreatedAt) {
-        this.recordedCreatedAt = recordedCreatedAt;
-    }
-
-    public String getLastResponseBody() {
-        return lastResponseBody;
-    }
-
-    public void setLastResponseBody(final String lastResponseBody) {
-        this.lastResponseBody = lastResponseBody;
     }
 }

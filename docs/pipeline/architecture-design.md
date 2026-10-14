@@ -62,9 +62,9 @@ rich aggregate needing replay/audit-by-event — so CQRS/ES is deliberately drop
 | `…/sender` | new | `SenderFactory` routing, `GovNotifySender`, `Office365Sender` (stub in M1, live M6) | (legacy) `…/sender/SenderFactory.java`, `EmailSender`, `MicrosoftOffice365ClientService` |
 | `…/blob` | new | `AttachmentDownloader` (azure-storage-blob + Workload Identity), 403/404 → permanent-fail | `cpp-context-reference-data` (UC1 BYO filestore) |
 | `…/result` | new | `ResultEventPublisher` → `ReplyTo` queue, ReplyTo-gated, state-guarded | `cpp-mbd-idam-integration` ASB sender; (legacy) `NotificationNotifyPublicEventProcessor` (golden-master build logic) |
-| `…/query` | new | secured read REST controller (`GET /notifications/{id}`, `GET /notifications`) | `cp-court-list-publishing-service` REST/JPA; `cpp-mbd-idam-integration` auth |
+| ~~`…/query`~~ | **removed** (ADR-002 D7) | ~~secured read REST controller (`GET /notifications/{id}`, `GET /notifications`)~~ — the query API was removed: it returned `send_to_address` unauthenticated and had no consumer. HTTP is deny-by-default; only actuator health/info/prometheus are served | — |
 | `…/observability` | new | Micrometer metrics + DLQ-depth gauge + dropped-monitor counter (FR-023) | `cpp-mbd-idam-integration`, `cp-court-list-publishing-service` |
-| **`api-notification-gateway`** (new OpenAPI repo) | new | query-API OpenAPI spec (API-first, Q6) | `springboot-api-from-template` / `api-hmcts-crime-template` |
+| ~~**`api-notification-gateway`** (new OpenAPI repo)~~ | **not created** (ADR-002 D7) | ~~query-API OpenAPI spec (API-first, Q6)~~ — no query API, so no spec repo | — |
 | `cpp-flux-config` | changed | Flux `HelmRelease` of `springboot-app` chart + values/identity/secretProvider | `cpp-mbd-idam-integration` deploy pattern |
 | `cpp-helm-chart` | changed | `springboot-app` values; `ccm-namespace` MI (`mi.yaml`); ASB ASO CRDs (OQ-1) | `cpp-context-reference-data` UC1 identity |
 | `cpp-aks-deploy` | changed | `ccm_workload_identities` + Key Vault CSI (or Platform out-of-band) | UC1 |
@@ -91,12 +91,13 @@ mi-reportdata sends no `ReplyTo`)
   (optional fields only); a breaking change requires a new event name + ADR. When a real originator
   opts in, revisit promoting them to a shared CPP event-schema registry.
 
-**APIs** (query REST; **OpenAPI**, MbD standard; companion repo `api-notification-gateway`, Q6)
-- `GET /notifications/{notificationId}` → all columns of one row (AC-017).
-- `GET /notifications?status=&createdFrom=&createdTo=&page=&size=` → paged search (Q5 default).
-  `sendToAddress` filtering optional (PII — see cross-cutting). DB indexes on `status`, `created_at`.
-- **Authenticated from day one (Q3)** — IDAM JWT via `cp-auth-rules-filter` (per `cpp-mbd-idam-integration`).
-  Read-only, no write side effects (AC-018).
+**APIs** — **none** (superseded by ADR-002 D7). The originally planned query
+REST API (`GET /notifications/{notificationId}`, `GET /notifications?status=&createdFrom=&createdTo=`)
+was built in NG-S04 but shipped unauthenticated, returned `send_to_address` (personal data) and had no
+known consumer, so it was removed together with its OpenAPI contract. The gateway has **no inbound
+business HTTP surface**: `SecurityConfig` is deny-by-default and permits only `/actuator/health/**`,
+`/actuator/info` and `/actuator/prometheus`. Support reads move to logs, metrics, result events and the
+read-only database role.
 
 **Transport binding (physical — Stage 2's to own; Q1: Stage 2 authoritative, producer conforms)**
 
@@ -147,7 +148,6 @@ flowchart LR
     DB[(Postgres:<br/>notification + jobs)]
     TM[cp-task-manager<br/>embedded]
     SND[SenderFactory]
-    Q[Query REST API<br/>IDAM-authenticated]
   end
   GN[Gov.UK Notify]
   O365[O365 via APIM<br/>Milestone 6]
@@ -164,7 +164,6 @@ flowchart LR
   SND --> GN
   SND -.M6.-> O365
   SND -->|result event if ReplyTo| RQ
-  Q --> DB
   SND -. secret .-> KV
 ```
 
@@ -201,16 +200,14 @@ sequenceDiagram
 ```
 
 ### Cross-cutting
-- **AuthZ:** command path has **no REST surface** (AC-002). Query API **authenticated from day one**
-  (Q3) — IDAM JWT via `cp-auth-rules-filter`; **FR-024 (secure query API) is pulled into the MVP and
-  delivered alongside FR-009**, no longer deferred to Milestone 7. ASB + Blob + Key Vault access via
+- **AuthZ:** command path has **no REST surface** (AC-002), and there is no query API either (removed,
+  ADR-002 D7 — supersedes Q3/FR-009/FR-024): HTTP is deny-by-default, actuator only. ASB + Blob + Key Vault access via
   **managed-identity RBAC only** (FR-013/014,
   NFR-002): ASB Data Receiver + Data Sender at **namespace** scope (queue scope would break dynamic
   `ReplyTo` routing — Constraints), Storage Blob Data Reader on attachment container(s), Key Vault
   Secrets User (read-only). No SAS/connection strings in prod (emulator-only local exception).
 - **PII / data classification:** `send_to_address` (recipient email) is OFFICIAL-SENSITIVE (NFR-005).
-  Never logged (NFR-004). Because the query API is authenticated (Q3), returning all columns is safe;
-  `sendToAddress` search is optional and, if enabled, sits behind the same auth.
+  Never logged (NFR-004). Never served over HTTP: the query API that returned it was removed (ADR-002 D7).
 - **Audit/metrics (FR-023, NFR-007/008):** JSON logs to stdout via logstash-logback-encoder with
   `correlationId`+`requestId` MDC (template logback unmodified); Micrometer `/actuator/prometheus`;
   OpenTelemetry → Azure Monitor; **DLQ-depth gauge** on inbound + result queues; counter for dropped
@@ -309,7 +306,7 @@ sequenceDiagram
 - [ ] `SenderFactory` seam (Gov.Notify live; O365 stub) — FR-018 (stub) → FR-018/019 live in M6.
 - [ ] `ResultEventPublisher` (ReplyTo-gated, state-guarded); `contracts/` JSON schemas +
       golden-master parity test — FR-007/008.
-- [ ] Query REST API + OpenAPI in `api-notification-gateway`; IDAM auth from day one — FR-009 + Q3.
+- [x] ~~Query REST API + OpenAPI in `api-notification-gateway`; IDAM auth from day one — FR-009 + Q3.~~ Removed (ADR-002 D7).
 - [ ] Failure handling (`markAttempted`/`markFailed`, task COMPLETED on exhaustion), at-least-once
       guards, **idempotent send via Gov.Notify recover-by-reference at the start of the send path** —
       FR-020/022.
@@ -330,7 +327,7 @@ sequenceDiagram
      prevented without a sweep/outbox.
 - **OQ-4 — cp-task-manager stale-lock recovery gap:** upstream library gap (no reaper for jobs whose
   worker crashed mid-execution). See `cp-task-manager-stale-lock-gap.md`; raise a cp-task-manager ticket.
-- **New repo:** `api-notification-gateway` (OpenAPI, API-first) — via `springboot-api-from-template`.
+- ~~**New repo:** `api-notification-gateway` (OpenAPI, API-first)~~ — not needed; the query API was removed (ADR-002 D7).
 - **Design artifact:** `docs/pipeline/artifacts/001-notification-gateway-blueprint.html`
   (architecture blueprint, template 08) — surfaced at the Stage 2 human gate.
 
@@ -339,9 +336,9 @@ sequenceDiagram
 |---|-----|----------|-------------|------------|----------------|
 | 1 | AMBIGUOUS→resolved (Q1) | Inbound ASB envelope | Manifest delegated envelope to Stage 2; producer-side out of scope, envelope not frozen | Coordinator: **Stage 2 authoritative, producer conforms** — flat body, `subject`=command name, originator top-level body field, `correlationId` in appProps, native `ReplyTo`. Frozen in `contracts/`. | Medium — ingest fails loudly to DLQ if producer diverges; no silent data loss. |
 | 2 | AMBIGUOUS→resolved (Q2) | NCES size vs 2 MB / O365 timing | Milestone 6 note asked to confirm typical NCES size | Coordinator: **milestone order unchanged, not a go-live blocker**; build SenderFactory seam in M1, deliver O365 in M6. | Low — sequencing confirmed; carried as Risk 2. |
-| 3 | AMBIGUOUS→resolved (Q3) | Query-API auth in MVP vs deferred | FR-009 MVP unauthenticated returning PII; FR-024 (M7) adds auth — tension with NFR-005 | Coordinator: **pull FR-024 auth INTO the MVP** (IDAM JWT); no unauthenticated PII endpoint ships. | Low once applied — removes the security tension. |
+| 3 | AMBIGUOUS→resolved (Q3); **superseded by ADR-002 D7** (query API removed) | Query-API auth in MVP vs deferred | FR-009 MVP unauthenticated returning PII; FR-024 (M7) adds auth — tension with NFR-005 | Coordinator: **pull FR-024 auth INTO the MVP** (IDAM JWT); no unauthenticated PII endpoint ships. | Low once applied — removes the security tension. |
 | 4 | MISSING → routes to Stage 1 / product / DPO | Data-retention period (NFR-014, UK-GDPR) — **stage-gating by default** | NFR-014/Constraints require a defined+enforced retention period; **no value given**, no FR enforces it | Coordinator: **defer enforcement, record the gap** — schema supports future purge (indexed `created_at`), no `@Scheduled` purge in these epics. **Route to product/DPO to set the period.** | High if never set — UK-GDPR non-compliance / unbounded OFFICIAL-SENSITIVE retention. **Must be resolved before go-live**; amend `requirements.md` NFR-014 with the agreed period. |
-| 5 | ASSUMED (Q5, accepted) | Query search shape | FR-009 "lookup and search", fields/paging unspecified | Default accepted: by-id + `status`/`createdFrom`/`createdTo` + page/size; index `status`,`created_at`; `sendToAddress` optional | Low — additive to the OpenAPI contract. |
+| 5 | ASSUMED (Q5, accepted); **superseded by ADR-002 D7** | Query search shape | FR-009 "lookup and search", fields/paging unspecified | Default accepted: by-id + `status`/`createdFrom`/`createdTo` + page/size; index `status`,`created_at`; `sendToAddress` optional | Low — additive to the OpenAPI contract. |
 | 6 | ASSUMED (Q6, accepted) | Contract-artefact homes | Event schema repo + query api- repo left to implementation | Default accepted: events in-repo `contracts/` (additive-only); companion `api-notification-gateway` OpenAPI repo | Low — re-promotable to a shared registry later. |
 | 7 | WOULD-HAVE-USED-PRIOR-ARTEFACT / not-available-locally | ASB sender + Flux/Helm/RBAC specifics | Requirements cite `service-cp-crime-hearing-results-document-subscription`, `cpp-flux-config`, `cpp-helm-chart`, `cpp-aks-deploy` as pattern sources | **Not checked out locally** — deployment specifics SAFE-DEFAULTed from `cpp-mbd-idam-integration` + `cpp-context-reference-data` (UC1) + `azure-sdk-guide.md`. Verify against the real repos at implementation. | Medium — exact Helm/Flux keys and the ASB sender idioms need confirming before deploy. |
 | 8 | INHERITED-OPEN (Platform-owned) | OQ-1 ASO for ASB CRDs; OQ-2 ACR/App-Insights identity; OQ-3 `sadevcommonscsl` | Requirements Open questions 1–3, owner Platform, due TBD | Not resolved here — **both provisioning paths presented** (ASO CRDs vs Platform out-of-band); OQ-2/OQ-3 carried as assumptions. | Medium — OQ-1 decides the provisioning mechanism (not the RBAC model); OQ-2/OQ-3 low. |

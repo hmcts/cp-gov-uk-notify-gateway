@@ -6,6 +6,7 @@ ADR if one is adopted) and remove it from here.
 
 | Decision | Status | Gated by |
 |---|---|---|
-| [Query-API authentication](query-api-authentication.md) (NG-S04 / FR-024) | ⏳ Decision pending | Exposure & day-one consumer (Pattern 1 vs 2) |
 | [Attachment `fileName` validation](attachment-filename-validation.md) | ⏳ Decision pending | Where to validate (message vs blob HEAD) + fatal vs fallback |
-| [Query-API implementation approach](query-api-implementation.md) (NG-S04 / FR-009) | ✅ Decided — Option B (hand-written controller, no ADR; contract-first migration debt tracked) | — |
+
+The former query-API notes (`query-api-authentication.md`, `query-api-implementation.md`) were retired
+when the query API was removed — see [ADR-002 D7](../adrs/002-deviations-from-legacy-notify-context.md).

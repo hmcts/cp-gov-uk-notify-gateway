@@ -17,10 +17,6 @@ updates:
       # targets the 1.5.x API; block major bumps until the helper is migrated. Minor/patch still flow.
       - dependency-name: "com.networknt:json-schema-validator"
         update-types: ["version-update:semver-major"]
-      # swagger-request-validator 3.x pulls json-schema-validator 3.x transitively, so its major is
-      # coupled to the pin above — bump both together when ContractSchema is migrated.
-      - dependency-name: "com.atlassian.oai:swagger-request-validator-mockmvc"
-        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/" # location of your workflow files

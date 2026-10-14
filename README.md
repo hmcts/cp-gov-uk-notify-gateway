@@ -13,7 +13,8 @@ behalf of CPP contexts. It is the re-platform of the legacy WildFly `cpp-context
   **cp-task-manager**.
 - **Publishes the outcome** (sent / failed / bounced) to the queue named in the inbound message's
   `ReplyTo` property — per-originator, and only when `ReplyTo` is present (otherwise fire-and-forget).
-- **Exposes a read/query API** over the notification store.
+- **Serves no business HTTP API** — only the actuator health, info and Prometheus endpoints are
+  reachable over HTTP; every other path is refused (ADR-002 D7).
 
 ## Tech
 
