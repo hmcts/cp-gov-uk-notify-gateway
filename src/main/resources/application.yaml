@@ -66,6 +66,13 @@ cp:
         enabled: ${CP_NG_GOVNOTIFY_PROXY_ENABLED:false}
         host: ${CP_NG_GOVNOTIFY_PROXY_HOST:}
         port: ${CP_NG_GOVNOTIFY_PROXY_PORT:0}
+    material:
+      system-user-id: ${CP_NG_SYSTEM_USER_ID:}
+      base-url: ${CP_NG_MATERIAL_BASE_URL:}
+      connect-timeout: ${CP_NG_MATERIAL_CONNECT_TIMEOUT:5s}
+      read-timeout: ${CP_NG_MATERIAL_READ_TIMEOUT:35s}
+      sas-connect-timeout: ${CP_NG_MATERIAL_SAS_CONNECT_TIMEOUT:5s}
+      sas-read-timeout: ${CP_NG_MATERIAL_SAS_READ_TIMEOUT:30s}
     retry:
       # Preserved legacy email retry/poll backoff (seconds); legacy default from
       # notify.email.retry.threshold.durations. Overridable per environment without a redeploy.

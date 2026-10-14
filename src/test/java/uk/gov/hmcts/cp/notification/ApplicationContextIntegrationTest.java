@@ -13,10 +13,15 @@ import org.springframework.http.ResponseEntity;
 
 import uk.gov.hmcts.cp.notification.integration.base.AbstractEndToEndIntegrationTest;
 import uk.gov.hmcts.cp.notification.integration.repository.NotificationTestRepository;
+import uk.gov.hmcts.cp.notification.integration.stubs.support.WireMockSupport;
+import uk.gov.hmcts.cp.notification.material.MaterialSettings;
 import uk.gov.hmcts.cp.notification.persistence.NotificationEntity;
 
+import java.net.URI;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static uk.gov.hmcts.cp.notification.integration.testdata.NotificationEntityFactory.aNotificationEntity;
@@ -34,6 +39,18 @@ class ApplicationContextIntegrationTest extends AbstractEndToEndIntegrationTest 
     @Test
     void the_application_context_loads() {
         assertThat(applicationContext.getBeanDefinitionCount()).isPositive();
+    }
+
+    @Test
+    void the_application_starts_with_the_configured_material_settings_and_default_timeouts() {
+        final MaterialSettings settings = applicationContext.getBean(MaterialSettings.class);
+
+        assertThat(settings.systemUserId()).isEqualTo(UUID.fromString("0f0e0d0c-0b0a-4908-8706-050403020100"));
+        assertThat(settings.baseUrl()).isEqualTo(URI.create(WireMockSupport.baseUrl() + "/material-service"));
+        assertThat(settings.connectTimeout()).isEqualTo(Duration.ofSeconds(5));
+        assertThat(settings.readTimeout()).isEqualTo(Duration.ofSeconds(35));
+        assertThat(settings.sasConnectTimeout()).isEqualTo(Duration.ofSeconds(5));
+        assertThat(settings.sasReadTimeout()).isEqualTo(Duration.ofSeconds(30));
     }
 
     @Nested
