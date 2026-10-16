@@ -12,6 +12,7 @@ import uk.gov.hmcts.cp.notification.blob.AttachmentDownloader;
 import uk.gov.hmcts.cp.notification.blob.PermanentBlobException;
 import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
 import uk.gov.hmcts.cp.notification.material.MaterialAttachmentDownloader;
+import uk.gov.hmcts.cp.notification.material.MaterialAttachmentException;
 import uk.gov.hmcts.cp.notification.sender.Attachment;
 import uk.gov.hmcts.cp.notification.sender.EmailSender;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
@@ -77,6 +78,23 @@ public class SendEmailTask implements ExecutableTask {
         } catch (final BlobStorageException e) {
             result = failurePolicy.retryOrFail(command.notificationId(), e.getStatusCode(),
                     "Attachment download did not recover within the retry window", executionInfo);
+        } catch (final MaterialAttachmentException e) {
+            result = materialAttachmentFailed(command, e, executionInfo);
+        }
+        return result;
+    }
+
+    private ExecutionInfo materialAttachmentFailed(
+            final SendEmailCommand command, final MaterialAttachmentException failure, final ExecutionInfo executionInfo) {
+        final ExecutionInfo result;
+        if (failure.isRetryable()) {
+            result = failurePolicy.retryOrFail(command.notificationId(), failure.getStatusCode(),
+                    "Material attachment download did not recover within the retry window", executionInfo);
+        } else {
+            LOG.warn("Permanent Material attachment failure for notification {} ({}) — marking FAILED, no retry",
+                    command.notificationId(), failure.getMessage());
+            result = failurePolicy.fail(command.notificationId(), failure.getStatusCode(), failure.getMessage(),
+                    executionInfo);
         }
         return result;
     }

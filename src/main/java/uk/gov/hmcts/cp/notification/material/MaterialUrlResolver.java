@@ -45,7 +45,7 @@ public class MaterialUrlResolver {
         } else if (isLoopback(link) && isUnderMaterialQueryApi(link)) {
             resolved = rewriteOntoBaseUrl(link);
         } else {
-            throw new MaterialAttachmentException(REFUSED);
+            throw MaterialAttachmentException.permanent(REFUSED, null);
         }
         return resolved;
     }
@@ -55,10 +55,10 @@ public class MaterialUrlResolver {
         try {
             link = new URI(materialUrl.trim());
         } catch (final URISyntaxException e) {
-            throw new MaterialAttachmentException(REFUSED);
+            throw MaterialAttachmentException.permanent(REFUSED, null);
         }
         if (link.getScheme() == null || link.getHost() == null) {
-            throw new MaterialAttachmentException(REFUSED);
+            throw MaterialAttachmentException.permanent(REFUSED, null);
         }
         return link;
     }

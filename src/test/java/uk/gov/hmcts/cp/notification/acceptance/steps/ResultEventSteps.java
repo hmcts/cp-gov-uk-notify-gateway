@@ -30,6 +30,15 @@ public class ResultEventSteps {
                 .withField("notificationId", context.getNotificationId());
     }
 
+    @Then("a notification-failed result event with status {int} is published to the originator's reply queue")
+    public void a_notification_failed_result_event_with_status_is_published_to_the_reply_queue(final int status) {
+        aResultQueue(RESULT_QUEUE)
+                .receivesResultEvent()
+                .withSubject("public.notificationnotify.events.notification-failed")
+                .withField("notificationId", context.getNotificationId())
+                .withField("statusCode", status);
+    }
+
     @Then("no result event is published")
     public void no_result_event_is_published() {
         aResultQueue(RESULT_QUEUE).receivesNoResultEvent();

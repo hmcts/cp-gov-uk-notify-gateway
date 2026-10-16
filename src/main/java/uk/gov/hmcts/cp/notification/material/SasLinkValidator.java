@@ -21,11 +21,11 @@ public class SasLinkValidator {
         try {
             link = new URI(sasLink);
         } catch (final URISyntaxException e) {
-            throw new MaterialAttachmentException(REJECTED);
+            throw MaterialAttachmentException.permanent(REJECTED, null);
         }
         if (link.getScheme() == null || !isAllowedScheme(link.getScheme().toLowerCase(Locale.ROOT))
                 || link.getHost() == null || !isAllowedHost(link.getHost().toLowerCase(Locale.ROOT))) {
-            throw new MaterialAttachmentException(REJECTED);
+            throw MaterialAttachmentException.permanent(REJECTED, null);
         }
         return link;
     }

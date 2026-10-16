@@ -3,6 +3,7 @@ package uk.gov.hmcts.cp.notification.acceptance.steps;
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.When;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 
 import uk.gov.hmcts.cp.notification.integration.stubs.GovUkNotifyStubService;
 import uk.gov.hmcts.cp.notification.integration.stubs.MaterialServiceStub;
@@ -19,6 +20,11 @@ import static uk.gov.hmcts.cp.notification.integration.stubs.support.ServiceBusC
 
 public class CommandSteps {
     private static final String MATERIAL_DOCUMENT_FILENAME = "d20.pdf";
+    private static final int HTTP_BAD_REQUEST = 400;
+    private static final int HTTP_FORBIDDEN = 403;
+
+    @Value("${cp.notification.blob.max-attachment-bytes}")
+    private long maxAttachmentBytes;
 
     @Autowired
     private ScenarioContext context;
@@ -101,6 +107,41 @@ public class CommandSteps {
                 "fileUri", fileUri)));
     }
 
+    @Given("a send-email-notification command for a recipient with a Material link to an unrecognised address")
+    public void a_send_email_notification_command_with_a_material_link_to_an_unrecognised_address() {
+        aMaterialNotificationIsPrepared();
+        aCommandWithTheMaterialLink(material.unrecognisedLinkFor(context.getMaterialId()));
+    }
+
+    @Given("a send-email-notification command for a recipient with a Material document too large to send")
+    public void a_send_email_notification_command_with_a_material_document_too_large_to_send() {
+        aMaterialNotificationIsPrepared();
+        material.documentLargerThanTheCapWillBeServed(context.getMaterialId(), MATERIAL_DOCUMENT_FILENAME, maxAttachmentBytes);
+        aCommandWithTheMaterialLink(material.materialClientLinkFor(context.getMaterialId()));
+    }
+
+    @Given("a send-email-notification command for a recipient with a Material link that Material rejects as invalid")
+    public void a_send_email_notification_command_with_a_material_link_that_material_rejects_as_invalid() {
+        aMaterialNotificationIsPrepared();
+        material.materialWillAnswer(context.getMaterialId(), HTTP_BAD_REQUEST);
+        aCommandWithTheMaterialLink(material.materialClientLinkFor(context.getMaterialId()));
+    }
+
+    @Given("a send-email-notification command for a recipient with a Material document that is briefly unavailable")
+    public void a_send_email_notification_command_with_a_material_document_that_is_briefly_unavailable() {
+        aMaterialNotificationIsPrepared();
+        material.documentWillBeUnavailableOnceThenServed(
+                context.getMaterialId(), MATERIAL_DOCUMENT_FILENAME, context.getAttachmentBytes());
+        aCommandWithTheMaterialLink(material.materialClientLinkFor(context.getMaterialId()));
+    }
+
+    @Given("a send-email-notification command for a recipient with a Material document the gateway is not allowed to fetch")
+    public void a_send_email_notification_command_with_a_material_document_the_gateway_is_not_allowed_to_fetch() {
+        aMaterialNotificationIsPrepared();
+        material.materialWillAnswer(context.getMaterialId(), HTTP_FORBIDDEN);
+        aCommandWithTheMaterialLink(material.materialClientLinkFor(context.getMaterialId()));
+    }
+
     @Given("the originator provides a reply queue")
     public void the_originator_provides_a_reply_queue() {
         context.setReplyQueue(RESULT_QUEUE);
@@ -112,13 +153,25 @@ public class CommandSteps {
     }
 
     private void aMaterialDocumentIsAvailable() {
+        aMaterialNotificationIsPrepared();
+        material.documentWillBeServed(context.getMaterialId(), MATERIAL_DOCUMENT_FILENAME, context.getAttachmentBytes());
+    }
+
+    private void aCommandWithTheMaterialLink(final String materialUrl) {
+        context.setMaterialUrl(materialUrl);
+        context.setCommandJson(load("fixtures/commands/send-email-with-material-url.json", of(
+                "notificationId", context.getNotificationId(),
+                "templateId", context.getTemplateId(),
+                "materialUrl", materialUrl)));
+    }
+
+    private void aMaterialNotificationIsPrepared() {
         final String notificationId = randomUUID().toString();
         final String templateId = randomUUID().toString();
         final String externalReference = randomUUID().toString();
         final String materialId = randomUUID().toString();
         final byte[] document = loadBytes("fixtures/attachments/material-document.pdf");
 
-        material.documentWillBeServed(materialId, MATERIAL_DOCUMENT_FILENAME, document);
         govUkNotify
                 .sendEmailNotificationWillReturnSuccess(externalReference)
                 .getNotificationStatusWillReturnSuccess(externalReference);

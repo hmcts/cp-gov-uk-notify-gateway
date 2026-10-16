@@ -41,6 +41,8 @@ class SasLinkValidatorTest {
         assertThatThrownBy(() -> validator.validate(link))
                 .isInstanceOf(MaterialAttachmentException.class)
                 .hasMessage("Material returned a document link that is not an https Azure Blob Storage link")
+                .hasFieldOrPropertyWithValue("statusCode", null)
+                .hasFieldOrPropertyWithValue("retryable", false)
                 .hasNoCause();
     }
 }

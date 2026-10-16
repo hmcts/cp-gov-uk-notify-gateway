@@ -33,6 +33,7 @@ import java.util.concurrent.TimeoutException;
 @Component
 public class SasDocumentFetcher {
     private static final int HTTP_OK = 200;
+    private static final int HTTP_BAD_REQUEST = 400;
     private static final int HTTP_PAYLOAD_TOO_LARGE = 413;
     private static final byte[] DISCARDED = new byte[0];
 
@@ -54,10 +55,14 @@ public class SasDocumentFetcher {
     public byte[] fetch(final URI sasLink) {
         final HttpRequest request = HttpRequest.newBuilder(sasLink).GET().timeout(readTimeout).build();
         final HttpResponse<byte[]> response = send(request);
-        if (response.statusCode() != HTTP_OK) {
-            throw new MaterialAttachmentException(
-                    "The Material document could not be downloaded (HTTP " + response.statusCode() + ")",
-                    response.statusCode());
+        final int status = response.statusCode();
+        if (status == HTTP_BAD_REQUEST) {
+            throw MaterialAttachmentException.permanent(
+                    "The Material document link was rejected by storage (HTTP " + status + ")", status);
+        }
+        if (status != HTTP_OK) {
+            throw MaterialAttachmentException.retryable(
+                    "The Material document could not be downloaded (HTTP " + status + ")", status);
         }
         return response.body();
     }
@@ -68,17 +73,18 @@ public class SasDocumentFetcher {
             return pending.get(deadline.toMillis(), TimeUnit.MILLISECONDS);
         } catch (final TimeoutException e) {
             pending.cancel(true);
-            throw new MaterialAttachmentException("The Material document was not downloaded in time", e);
+            throw MaterialAttachmentException.retryable("The Material document was not downloaded in time", null, e);
         } catch (final ExecutionException e) {
             final DocumentTooLargeException tooLarge = tooLargeCause(e);
             if (tooLarge != null) {
-                throw new MaterialAttachmentException(tooLargeMessage(tooLarge), HTTP_PAYLOAD_TOO_LARGE);
+                throw MaterialAttachmentException.permanent(tooLargeMessage(tooLarge), HTTP_PAYLOAD_TOO_LARGE);
             }
-            throw new MaterialAttachmentException("The Material document could not be downloaded", e.getCause());
+            throw MaterialAttachmentException.retryable(
+                    "The Material document could not be downloaded", null, e.getCause());
         } catch (final InterruptedException e) {
             pending.cancel(true);
             Thread.currentThread().interrupt();
-            throw new MaterialAttachmentException("The Material document download was interrupted", e);
+            throw MaterialAttachmentException.retryable("The Material document download was interrupted", null, e);
         }
     }
 

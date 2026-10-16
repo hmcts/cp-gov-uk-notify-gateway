@@ -18,7 +18,12 @@ public final class MaterialSettingsFactory {
     }
 
     public static MaterialSettings aMaterialSettings(final String baseUrl) {
+        return aMaterialSettings(baseUrl, Duration.ofSeconds(35), Duration.ofSeconds(30));
+    }
+
+    public static MaterialSettings aMaterialSettings(
+            final String baseUrl, final Duration readTimeout, final Duration sasReadTimeout) {
         return new MaterialSettings(SYSTEM_USER_ID, URI.create(baseUrl),
-                Duration.ofSeconds(5), Duration.ofSeconds(35), Duration.ofSeconds(30));
+                Duration.ofSeconds(5), readTimeout, sasReadTimeout);
     }
 }

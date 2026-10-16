@@ -27,6 +27,8 @@ public class MaterialClient {
     public static final String MATERIAL_MEDIA_TYPE = "application/vnd.material.query.material+json";
 
     private static final int HTTP_OK = 200;
+    private static final int HTTP_BAD_REQUEST = 400;
+    private static final int HTTP_PAYLOAD_TOO_LARGE = 413;
     private static final String FILENAME_MARKER = "filename=";
 
     private final HttpClient httpClient;
@@ -52,15 +54,20 @@ public class MaterialClient {
                 .header(CPPCLIENTCORRELATIONID, notificationId.toString())
                 .build();
         final HttpResponse<Void> response = send(request);
-        if (response.statusCode() != HTTP_OK) {
-            throw new MaterialAttachmentException(
-                    "Material did not return the document (HTTP " + response.statusCode() + ")", response.statusCode());
+        final int status = response.statusCode();
+        if (status == HTTP_BAD_REQUEST || status == HTTP_PAYLOAD_TOO_LARGE) {
+            throw MaterialAttachmentException.permanent(
+                    "Material rejected the document request (HTTP " + status + ")", status);
+        }
+        if (status != HTTP_OK) {
+            throw MaterialAttachmentException.retryable(
+                    "Material did not return the document (HTTP " + status + ")", status);
         }
         final String sasLink = response.headers().firstValue("Location")
                 .filter(value -> !value.isBlank())
-                .orElseThrow(() -> new MaterialAttachmentException("Material answered without a document link", HTTP_OK));
+                .orElseThrow(() -> MaterialAttachmentException.retryable("Material answered without a document link", HTTP_OK));
         final String filename = filenameFrom(response.headers().firstValue("Content-Location"))
-                .orElseThrow(() -> new MaterialAttachmentException("Material answered without a document filename", HTTP_OK));
+                .orElseThrow(() -> MaterialAttachmentException.retryable("Material answered without a document filename", HTTP_OK));
         return new MaterialDocumentLink(sasLink, filename);
     }
 
@@ -71,13 +78,13 @@ public class MaterialClient {
             return pending.get(deadline.toMillis(), TimeUnit.MILLISECONDS);
         } catch (final TimeoutException e) {
             pending.cancel(true);
-            throw new MaterialAttachmentException("Material did not answer in time", e);
+            throw MaterialAttachmentException.retryable("Material did not answer in time", null, e);
         } catch (final ExecutionException e) {
-            throw new MaterialAttachmentException("Material could not be reached", e.getCause());
+            throw MaterialAttachmentException.retryable("Material could not be reached", null, e.getCause());
         } catch (final InterruptedException e) {
             pending.cancel(true);
             Thread.currentThread().interrupt();
-            throw new MaterialAttachmentException("Material request was interrupted", e);
+            throw MaterialAttachmentException.retryable("Material request was interrupted", null, e);
         }
     }
 

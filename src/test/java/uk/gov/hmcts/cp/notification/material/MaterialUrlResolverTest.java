@@ -24,6 +24,8 @@ class MaterialUrlResolverTest {
         assertThatThrownBy(() -> resolver.resolve(link))
                 .isInstanceOf(MaterialAttachmentException.class)
                 .hasMessage(REFUSED)
+                .hasFieldOrPropertyWithValue("statusCode", null)
+                .hasFieldOrPropertyWithValue("retryable", false)
                 .hasNoCause();
     }
 
