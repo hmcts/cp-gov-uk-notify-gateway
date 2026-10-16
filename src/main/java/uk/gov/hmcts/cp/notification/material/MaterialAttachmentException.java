@@ -11,13 +11,13 @@ public final class MaterialAttachmentException extends RuntimeException {
     private static final long serialVersionUID = 1L;
 
     private final transient Integer statusCode;
-    private final boolean retryable;
+    private final boolean retryAllowed;
 
     private MaterialAttachmentException(
             final String message, final Integer statusCode, final boolean retryable, final Throwable cause) {
         super(message, cause);
         this.statusCode = statusCode;
-        this.retryable = retryable;
+        this.retryAllowed = retryable;
     }
 
     public static MaterialAttachmentException permanent(final String message, final Integer statusCode) {
@@ -38,6 +38,6 @@ public final class MaterialAttachmentException extends RuntimeException {
     }
 
     public boolean isRetryable() {
-        return retryable;
+        return retryAllowed;
     }
 }

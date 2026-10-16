@@ -248,7 +248,7 @@ class MaterialAttachmentDownloaderIntegrationTest {
     private static MaterialAttachmentDownloader downloaderFor(final MaterialSettings settings, final long maxBytes) {
         final HttpClient sharedClient = new MaterialConfig().materialHttpClient(settings);
         return new MaterialAttachmentDownloader(
-                new MaterialUrlResolver(settings),
+                new MaterialUrlResolver(new MaterialHostMatcher(settings), new LoopbackMaterialLinkRewriter(settings)),
                 new MaterialClient(sharedClient, settings),
                 new WireMockSasLinkValidator(),
                 new SasDocumentFetcher(sharedClient, settings, maxBytes));
