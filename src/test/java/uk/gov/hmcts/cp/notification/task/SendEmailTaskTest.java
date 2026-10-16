@@ -82,7 +82,7 @@ class SendEmailTaskTest {
 
     @BeforeEach
     void setUp() {
-        task = new SendEmailTask(attachmentDownloader, materialAttachmentDownloader, emailSender, new TransientFailurePolicy(statusService),
+        task = new SendEmailTask(attachmentDownloader, materialAttachmentDownloader, emailSender, new TransientFailurePolicy(statusService, new Clock(), LEGACY_EMAIL_RETRY_DURATIONS),
                 executionService, objectMapper, new CpTaskFactory(objectMapper, clock),
                 LEGACY_EMAIL_RETRY_DURATIONS);
     }
