@@ -22,10 +22,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.MATERIAL_URL;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.aSendEmailCommand;
 
 @ExtendWith(MockitoExtension.class)
@@ -51,28 +53,42 @@ class NotificationIngestionServiceTest {
     @Test
     void persists_a_queued_notification_and_enqueues_a_send_email_task() {
         final UUID id = UUID.randomUUID();
-        when(notificationRepository.insertIfAbsent(eq(id), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationRepository.insertIfAbsent(eq(id), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(1);
 
         service.ingest(aSendEmailCommand()
                 .notificationId(id)
                 .sendToAddress("user@example.com")
                 .clientContext("mi-reportdata")
+                .materialUrl(MATERIAL_URL)
                 .build(), "ng-result-correspondence");
 
         verify(notificationRepository).insertIfAbsent(eq(id), eq("EMAIL"), eq("QUEUED"), eq("user@example.com"),
-                eq("mi-reportdata"), eq("ng-result-correspondence"), any(), any());
+                eq("mi-reportdata"), eq("ng-result-correspondence"), eq(MATERIAL_URL), any(), any());
 
         final ArgumentCaptor<ExecutionInfo> job = ArgumentCaptor.forClass(ExecutionInfo.class);
         verify(executionService).executeWith(job.capture());
         assertThat(job.getValue().getAssignedTaskName()).isEqualTo(SendEmailTask.TASK_NAME);
-        assertThat(job.getValue().getJobData().toString()).contains(id.toString());
+        assertThat(job.getValue().getJobData().getString("notificationId")).isEqualTo(id.toString());
+        assertThat(job.getValue().getJobData().getString("materialUrl")).isEqualTo(MATERIAL_URL);
+    }
+
+    @Test
+    void persists_no_material_url_when_the_command_carries_none() {
+        final UUID id = UUID.randomUUID();
+        when(notificationRepository.insertIfAbsent(eq(id), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(1);
+
+        service.ingest(aSendEmailCommand().notificationId(id).build(), null);
+
+        verify(notificationRepository).insertIfAbsent(eq(id), eq("EMAIL"), eq("QUEUED"), any(), any(), isNull(),
+                isNull(), any(), any());
     }
 
     @Test
     void propagates_the_exception_when_enqueueing_the_send_email_task_fails() {
         final UUID id = UUID.randomUUID();
-        when(notificationRepository.insertIfAbsent(eq(id), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationRepository.insertIfAbsent(eq(id), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(1);
         doThrow(new IllegalStateException("enqueue failed")).when(executionService).executeWith(any());
 
@@ -83,7 +99,7 @@ class NotificationIngestionServiceTest {
     @Test
     void is_an_idempotent_no_op_for_a_duplicate_notification_id() {
         final UUID id = UUID.randomUUID();
-        when(notificationRepository.insertIfAbsent(eq(id), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationRepository.insertIfAbsent(eq(id), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(0);
 
         service.ingest(aSendEmailCommand().notificationId(id).build(), null);

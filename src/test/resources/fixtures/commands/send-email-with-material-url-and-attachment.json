@@ -1,0 +1,10 @@
+{
+  "notificationId": "${notificationId}",
+  "templateId": "${templateId}",
+  "sendToAddress": "reports@example.com",
+  "materialUrl": "${materialUrl}",
+  "fileUri": "${fileUri}",
+  "personalisation": {
+    "recipient_name": "Alex Morgan"
+  }
+}

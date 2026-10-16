@@ -19,6 +19,8 @@ cp:
   notification:
     material:
       system-user-id: 0f0e0d0c-0b0a-4908-8706-050403020100
+    retry:
+      email-durations-secs: 1,1,1
 
 # @SpringBootTest activates Spring Boot's LoggingApplicationListener, which re-applies logging.level
 # from config onto the logback context at startup — overriding logback-test.xml's root=ERROR with the

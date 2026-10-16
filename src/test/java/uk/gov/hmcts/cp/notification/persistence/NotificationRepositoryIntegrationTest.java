@@ -15,6 +15,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static uk.gov.hmcts.cp.notification.integration.testdata.NotificationEntityFactory.aNotificationEntity;
+import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.MATERIAL_URL;
 
 @DataJpaTest(showSql = false)
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -39,6 +40,7 @@ class NotificationRepositoryIntegrationTest {
                 .sendToAddress("recipient@example.com")
                 .clientContext("mi-reportdata")
                 .resultQueue("ng-result-mi-reportdata")
+                .materialUrl(MATERIAL_URL)
                 .build());
 
         final NotificationEntity reloaded = notifications.findById(id).orElseThrow();
@@ -47,6 +49,7 @@ class NotificationRepositoryIntegrationTest {
         assertThat(reloaded.getSendToAddress()).isEqualTo("recipient@example.com");
         assertThat(reloaded.getClientContext()).isEqualTo("mi-reportdata");
         assertThat(reloaded.getResultQueue()).isEqualTo("ng-result-mi-reportdata");
+        assertThat(reloaded.getMaterialUrl()).isEqualTo(MATERIAL_URL);
     }
 
     @Test
@@ -62,6 +65,7 @@ class NotificationRepositoryIntegrationTest {
         assertThat(reloaded.getSendToAddress()).isNull();
         assertThat(reloaded.getClientContext()).isNull();
         assertThat(reloaded.getResultQueue()).isNull();
+        assertThat(reloaded.getMaterialUrl()).isNull();
     }
 
     @Test
@@ -70,9 +74,9 @@ class NotificationRepositoryIntegrationTest {
         final OffsetDateTime now = OffsetDateTime.now();
 
         final int first = notifications.insertIfAbsent(id, "EMAIL", "QUEUED", "recipient@example.com",
-                "mi-reportdata", "ng-result-mi-reportdata", now, now);
+                "mi-reportdata", "ng-result-mi-reportdata", MATERIAL_URL, now, now);
         final int duplicate = notifications.insertIfAbsent(id, "EMAIL", "QUEUED", "other@example.com",
-                "other", "other-queue", now, now);
+                "other", "other-queue", null, now, now);
 
         assertThat(first).isEqualTo(1);
         assertThat(duplicate).isZero();
@@ -80,5 +84,6 @@ class NotificationRepositoryIntegrationTest {
         assertThat(reloaded.getStatus()).isEqualTo("QUEUED");
         assertThat(reloaded.getSendToAddress()).isEqualTo("recipient@example.com");
         assertThat(reloaded.getResultQueue()).isEqualTo("ng-result-mi-reportdata");
+        assertThat(reloaded.getMaterialUrl()).isEqualTo(MATERIAL_URL);
     }
 }

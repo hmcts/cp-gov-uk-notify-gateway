@@ -14,9 +14,9 @@ public interface NotificationRepository extends JpaRepository<NotificationEntity
     @Modifying
     @Query(value = "insert into notification "
             + "(notification_id, notification_type, status, send_to_address, client_context, "
-            + "result_queue, created_at, updated_at) "
+            + "result_queue, material_url, created_at, updated_at) "
             + "values (:id, :type, :status, :sendToAddress, :clientContext, "
-            + ":resultQueue, :createdAt, :updatedAt) "
+            + ":resultQueue, :materialUrl, :createdAt, :updatedAt) "
             + "on conflict (notification_id) do nothing", nativeQuery = true)
     int insertIfAbsent(@Param("id") UUID id,
                        @Param("type") String type,
@@ -24,6 +24,7 @@ public interface NotificationRepository extends JpaRepository<NotificationEntity
                        @Param("sendToAddress") String sendToAddress,
                        @Param("clientContext") String clientContext,
                        @Param("resultQueue") String resultQueue,
+                       @Param("materialUrl") String materialUrl,
                        @Param("createdAt") OffsetDateTime createdAt,
                        @Param("updatedAt") OffsetDateTime updatedAt);
 }

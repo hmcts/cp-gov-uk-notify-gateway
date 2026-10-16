@@ -8,7 +8,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 class BlobClientFactoryTest {
-    private static final String ALLOWED_HOST = "sastefilestore.blob.core.windows.net";
+    private static final String ALLOWED_HOST = "examplefilestore.blob.core.windows.net";
     private static final String AZURITE_CONNECTION_STRING =
             "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=dGVzdA==;"
                     + "BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;";

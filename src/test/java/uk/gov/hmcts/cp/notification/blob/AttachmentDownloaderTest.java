@@ -16,7 +16,7 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class AttachmentDownloaderTest {
-    private static final String FILE_URI = "https://sastefilestore.blob.core.windows.net/container/report.csv";
+    private static final String FILE_URI = "https://examplefilestore.blob.core.windows.net/container/report.csv";
     private static final long MAX_ATTACHMENT_BYTES = 15_728_640L;
 
     @Mock

@@ -13,6 +13,9 @@ public class ScenarioContext {
     private String commandJson;
     private String replyQueue;
     private byte[] attachmentBytes;
+    private String attachmentFilename;
+    private String materialId;
+    private String materialUrl;
 
     public String getNotificationId() {
         return notificationId;
@@ -60,5 +63,29 @@ public class ScenarioContext {
 
     public void setAttachmentBytes(final byte[] attachmentBytes) {
         this.attachmentBytes = attachmentBytes;
+    }
+
+    public String getAttachmentFilename() {
+        return attachmentFilename;
+    }
+
+    public void setAttachmentFilename(final String attachmentFilename) {
+        this.attachmentFilename = attachmentFilename;
+    }
+
+    public String getMaterialId() {
+        return materialId;
+    }
+
+    public void setMaterialId(final String materialId) {
+        this.materialId = materialId;
+    }
+
+    public String getMaterialUrl() {
+        return materialUrl;
+    }
+
+    public void setMaterialUrl(final String materialUrl) {
+        this.materialUrl = materialUrl;
     }
 }

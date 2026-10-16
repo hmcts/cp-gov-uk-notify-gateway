@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:hmcts:cp:cp-gov-uk-notify-gateway.send-email-notification",
   "title": "cp-gov-uk-notify-gateway send-email-notification",
-  "description": "MVP inbound ASB command contract consumed by cp-gov-uk-notify-gateway (the SendEmailCommand body on the ng-send-email command queue). Ported from the legacy cpp-context-notification-notify command schema — see command-send-email-notification-legacy.schema.json for the legacy contract to diff against. MVP delta from legacy: the legacy attachment references materialUrl + fileId are replaced by fileUri (the Azure Blob URI resolved by the attachment downloader, FR-004); the required set (notificationId, templateId, sendToAddress) is unchanged. The inbound ASB ReplyTo message property (captured into notification.result_queue, NG-S03) and correlationId travel in the message envelope, not this body. Additive-only evolution.",
+  "description": "MVP inbound ASB command contract consumed by cp-gov-uk-notify-gateway (the SendEmailCommand body on the ng-send-email command queue). Ported from the legacy cpp-context-notification-notify command schema — see command-send-email-notification-legacy.schema.json for the legacy contract to diff against. Delta from legacy: the legacy fileId attachment reference is replaced by fileUri (the Azure Blob URI resolved by the attachment downloader, FR-004); materialUrl is supported as in legacy (same name and type) - a Material document link the gateway resolves onto the Material service and downloads through Material; a non-blank materialUrl takes precedence over fileUri, and a blank one counts as absent; the required set (notificationId, templateId, sendToAddress) is unchanged. The inbound ASB ReplyTo message property (captured into notification.result_queue, NG-S03) and correlationId travel in the message envelope, not this body. Additive-only evolution.",
   "type": "object",
   "required": [
     "notificationId",
@@ -31,6 +31,9 @@
       "format": "uuid"
     },
     "fileUri": {
+      "type": "string"
+    },
+    "materialUrl": {
       "type": "string"
     },
     "personalisation": {

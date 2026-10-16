@@ -15,13 +15,11 @@ public record MaterialProperties(
         String baseUrl,
         @DefaultValue("5s") Duration connectTimeout,
         @DefaultValue("35s") Duration readTimeout,
-        @DefaultValue("5s") Duration sasConnectTimeout,
         @DefaultValue("30s") Duration sasReadTimeout) {
 
     @Override
     public String toString() {
         return "MaterialProperties[systemUserId=<redacted>, baseUrl=<redacted>, connectTimeout=" + connectTimeout
-                + ", readTimeout=" + readTimeout + ", sasConnectTimeout=" + sasConnectTimeout
-                + ", sasReadTimeout=" + sasReadTimeout + "]";
+                + ", readTimeout=" + readTimeout + ", sasReadTimeout=" + sasReadTimeout + "]";
     }
 }

@@ -4,10 +4,14 @@ import com.azure.core.http.HttpResponse;
 import com.azure.storage.blob.models.BlobStorageException;
 import jakarta.json.Json;
 import jakarta.json.JsonObject;
+import jakarta.json.JsonObjectBuilder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
@@ -18,6 +22,9 @@ import tools.jackson.databind.json.JsonMapper;
 import uk.gov.hmcts.cp.notification.blob.AttachmentDownloader;
 import uk.gov.hmcts.cp.notification.blob.PermanentBlobException;
 import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
+import uk.gov.hmcts.cp.notification.material.MaterialAttachmentDownloader;
+import uk.gov.hmcts.cp.notification.material.MaterialAttachmentException;
+import uk.gov.hmcts.cp.notification.sender.Attachment;
 import uk.gov.hmcts.cp.notification.sender.EmailSender;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
 import uk.gov.hmcts.cp.notification.sender.Office365NotYetSupportedException;
@@ -32,6 +39,7 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -41,6 +49,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static uk.gov.hmcts.cp.notification.integration.testdata.AttachmentFactory.aMaterialDocumentAttachment;
+import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.MATERIAL_URL;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendResultFactory.aSendResult;
 
 @ExtendWith(MockitoExtension.class)
@@ -50,6 +60,8 @@ class SendEmailTaskTest {
 
     @Mock
     private AttachmentDownloader attachmentDownloader;
+    @Mock
+    private MaterialAttachmentDownloader materialAttachmentDownloader;
     @Mock
     private EmailSender emailSender;
     @Mock
@@ -64,13 +76,13 @@ class SendEmailTaskTest {
     private SendEmailTask task;
 
     @Captor
-    private ArgumentCaptor<byte[]> attachmentCaptor;
+    private ArgumentCaptor<Attachment> attachmentCaptor;
     @Captor
     private ArgumentCaptor<ExecutionInfo> executionInfoCaptor;
 
     @BeforeEach
     void setUp() {
-        task = new SendEmailTask(attachmentDownloader, emailSender, new TransientFailurePolicy(statusService),
+        task = new SendEmailTask(attachmentDownloader, materialAttachmentDownloader, emailSender, new TransientFailurePolicy(statusService, new Clock(), LEGACY_EMAIL_RETRY_DURATIONS),
                 executionService, objectMapper, new CpTaskFactory(objectMapper, clock),
                 LEGACY_EMAIL_RETRY_DURATIONS);
     }
@@ -95,7 +107,53 @@ class SendEmailTaskTest {
 
             verify(attachmentDownloader).download(fileUri);
             verify(emailSender).sendEmail(any(SendEmailCommand.class), attachmentCaptor.capture());
-            assertThat(attachmentCaptor.getValue()).isEqualTo(bytes);
+            assertThat(attachmentCaptor.getValue().content()).isEqualTo(bytes);
+            assertThat(attachmentCaptor.getValue().filename()).isNull();
+            verifyNoInteractions(materialAttachmentDownloader);
+        }
+
+        @Test
+        void should_download_the_material_document_and_pass_it_with_its_filename_when_material_url_present() {
+            final UUID id = UUID.randomUUID();
+            final Attachment document = aMaterialDocumentAttachment();
+            when(materialAttachmentDownloader.download(MATERIAL_URL, id)).thenReturn(document);
+            when(emailSender.sendEmail(any(SendEmailCommand.class), any())).thenReturn(aSendResult().build());
+
+            task.execute(sendEmailJob(id, "", MATERIAL_URL));
+
+            verify(emailSender).sendEmail(any(SendEmailCommand.class), attachmentCaptor.capture());
+            assertThat(attachmentCaptor.getValue()).isEqualTo(document);
+            verify(attachmentDownloader, never()).download(any());
+        }
+
+        @Test
+        void should_attach_only_the_material_document_when_both_a_material_url_and_a_file_uri_are_present() {
+            final UUID id = UUID.randomUUID();
+            final Attachment document = aMaterialDocumentAttachment();
+            when(materialAttachmentDownloader.download(MATERIAL_URL, id)).thenReturn(document);
+            when(emailSender.sendEmail(any(SendEmailCommand.class), any())).thenReturn(aSendResult().build());
+
+            task.execute(sendEmailJob(id, "https://sa.blob.core.windows.net/mi-reportdata/report.csv", MATERIAL_URL));
+
+            verify(attachmentDownloader, never()).download(any());
+            verify(emailSender).sendEmail(any(SendEmailCommand.class), attachmentCaptor.capture());
+            assertThat(attachmentCaptor.getValue()).isEqualTo(document);
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"", "   "})
+        void should_attach_the_file_uri_blob_when_the_material_url_is_blank(final String blankMaterialUrl) {
+            final UUID id = UUID.randomUUID();
+            final String fileUri = "https://sa.blob.core.windows.net/mi-reportdata/report.csv";
+            final byte[] bytes = "report".getBytes(StandardCharsets.UTF_8);
+            when(attachmentDownloader.download(fileUri)).thenReturn(bytes);
+            when(emailSender.sendEmail(any(SendEmailCommand.class), any())).thenReturn(aSendResult().build());
+
+            task.execute(sendEmailJob(id, fileUri, blankMaterialUrl));
+
+            verifyNoInteractions(materialAttachmentDownloader);
+            verify(emailSender).sendEmail(any(SendEmailCommand.class), attachmentCaptor.capture());
+            assertThat(attachmentCaptor.getValue().content()).isEqualTo(bytes);
         }
 
         @Test
@@ -133,6 +191,60 @@ class SendEmailTaskTest {
 
     @Nested
     class WhenSendingFails {
+
+        @ParameterizedTest
+        @MethodSource("uk.gov.hmcts.cp.notification.task.SendEmailTaskTest#permanentMaterialFailures")
+        void should_mark_failed_with_the_failure_status_and_complete_without_retry_when_the_material_download_fails_permanently(
+                final MaterialAttachmentException failure) {
+            final UUID id = UUID.randomUUID();
+            when(materialAttachmentDownloader.download(MATERIAL_URL, id)).thenThrow(failure);
+
+            final ExecutionInfo result = task.execute(sendEmailJob(id, "", MATERIAL_URL));
+
+            verify(statusService).markFailed(id, failure.getStatusCode(), failure.getMessage());
+            verify(emailSender, never()).sendEmail(any(), any());
+            verify(executionService, never()).executeWith(any());
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
+            assertThat(result.isShouldRetry()).isFalse();
+        }
+
+        @Test
+        void should_retry_when_the_material_download_fails_retryably() {
+            final UUID id = UUID.randomUUID();
+            when(materialAttachmentDownloader.download(MATERIAL_URL, id)).thenThrow(
+                    MaterialAttachmentException.retryable("Material did not return the document (HTTP 404)", 404));
+
+            final ExecutionInfo result = task.execute(sendEmailJob(id, "", MATERIAL_URL));
+
+            verify(statusService, never()).markFailed(any(), any(), any());
+            verify(emailSender, never()).sendEmail(any(), any());
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
+            assertThat(result.isShouldRetry()).isTrue();
+        }
+
+        @Test
+        void should_mark_failed_with_the_last_status_when_the_material_download_keeps_failing_until_retries_are_exhausted() {
+            final UUID id = UUID.randomUUID();
+            when(materialAttachmentDownloader.download(MATERIAL_URL, id)).thenThrow(
+                    MaterialAttachmentException.retryable("Material did not return the document (HTTP 403)", 403));
+
+            final ExecutionInfo result = task.execute(sendEmailJobWithRetriesRemaining(id, "", MATERIAL_URL, 0));
+
+            verify(statusService).markFailed(id, 403, "Material attachment download did not recover within the retry window");
+            verify(emailSender, never()).sendEmail(any(), any());
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
+        }
+
+        @Test
+        void should_mark_failed_with_no_status_when_a_timeout_keeps_the_material_download_failing_until_retries_are_exhausted() {
+            final UUID id = UUID.randomUUID();
+            when(materialAttachmentDownloader.download(MATERIAL_URL, id)).thenThrow(
+                    MaterialAttachmentException.retryable("Material did not answer in time", null));
+
+            task.execute(sendEmailJobWithRetriesRemaining(id, "", MATERIAL_URL, 0));
+
+            verify(statusService).markFailed(id, null, "Material attachment download did not recover within the retry window");
+        }
 
         @Test
         void should_mark_failed_and_complete_without_retry_when_blob_download_is_permanently_failed() {
@@ -238,8 +350,12 @@ class SendEmailTaskTest {
     }
 
     private ExecutionInfo sendEmailJob(final UUID notificationId, final String fileUri) {
+        return sendEmailJob(notificationId, fileUri, null);
+    }
+
+    private ExecutionInfo sendEmailJob(final UUID notificationId, final String fileUri, final String materialUrl) {
         return ExecutionInfo.executionInfo()
-                .withJobData(commandJobData(notificationId, fileUri))
+                .withJobData(commandJobData(notificationId, fileUri, materialUrl))
                 .withAssignedTaskName(SendEmailTask.TASK_NAME)
                 .withAssignedTaskStartTime(ZonedDateTime.now(ZoneOffset.UTC))
                 .withExecutionStatus(ExecutionStatus.STARTED)
@@ -248,8 +364,13 @@ class SendEmailTaskTest {
 
     private ExecutionInfo sendEmailJobWithRetriesRemaining(
             final UUID notificationId, final String fileUri, final int retriesRemaining) {
+        return sendEmailJobWithRetriesRemaining(notificationId, fileUri, null, retriesRemaining);
+    }
+
+    private ExecutionInfo sendEmailJobWithRetriesRemaining(
+            final UUID notificationId, final String fileUri, final String materialUrl, final int retriesRemaining) {
         return ExecutionInfo.executionInfo()
-                .withJobData(commandJobData(notificationId, fileUri))
+                .withJobData(commandJobData(notificationId, fileUri, materialUrl))
                 .withAssignedTaskName(SendEmailTask.TASK_NAME)
                 .withAssignedTaskStartTime(ZonedDateTime.now(ZoneOffset.UTC))
                 .withExecutionStatus(ExecutionStatus.STARTED)
@@ -257,13 +378,27 @@ class SendEmailTaskTest {
                 .build();
     }
 
-    private static JsonObject commandJobData(final UUID notificationId, final String fileUri) {
-        return Json.createObjectBuilder()
+    private static JsonObject commandJobData(final UUID notificationId, final String fileUri, final String materialUrl) {
+        final JsonObjectBuilder jobData = Json.createObjectBuilder()
                 .add("notificationId", notificationId.toString())
                 .add("templateId", UUID.randomUUID().toString())
                 .add("sendToAddress", "user@example.com")
-                .add("fileUri", fileUri)
-                .build();
+                .add("fileUri", fileUri);
+        if (materialUrl != null) {
+            jobData.add("materialUrl", materialUrl);
+        }
+        return jobData.build();
+    }
+
+    static Stream<MaterialAttachmentException> permanentMaterialFailures() {
+        return Stream.of(
+                MaterialAttachmentException.permanent("Material link is not on the Material service", null),
+                MaterialAttachmentException.permanent(
+                        "Material returned a document link that is not an https Azure Blob Storage link", null),
+                MaterialAttachmentException.permanent("Material rejected the document request (HTTP 400)", 400),
+                MaterialAttachmentException.permanent("Material rejected the document request (HTTP 413)", 413),
+                MaterialAttachmentException.permanent(
+                        "The Material document exceeds the maximum attachment size of 15728640 bytes", 413));
     }
 
     private static BlobStorageException blobStorageException(final int statusCode) {

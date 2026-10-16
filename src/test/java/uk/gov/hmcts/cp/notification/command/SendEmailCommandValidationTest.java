@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.aSendEmailCommand;
+import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.aSendEmailCommandWithMaterialUrl;
 
 class SendEmailCommandValidationTest {
 
@@ -44,6 +45,13 @@ class SendEmailCommandValidationTest {
     @Test
     void accepts_an_absent_reply_to_address() {
         final SendEmailCommand command = aSendEmailCommand().replyToAddress(null).build();
+
+        assertThat(validator.validate(command)).isEmpty();
+    }
+
+    @Test
+    void accepts_a_material_url() {
+        final SendEmailCommand command = aSendEmailCommandWithMaterialUrl().build();
 
         assertThat(validator.validate(command)).isEmpty();
     }

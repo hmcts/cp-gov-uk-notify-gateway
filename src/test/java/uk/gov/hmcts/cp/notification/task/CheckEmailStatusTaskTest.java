@@ -14,6 +14,7 @@ import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
 import uk.gov.hmcts.cp.notification.sender.NotificationStatus;
 import uk.gov.hmcts.cp.notification.service.NotificationEmailDetails;
 import uk.gov.hmcts.cp.notification.service.NotificationStatusService;
+import uk.gov.hmcts.cp.notification.time.Clock;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionStatus;
 
@@ -46,7 +47,8 @@ class CheckEmailStatusTaskTest {
     @BeforeEach
     void setUp() {
         task = new CheckEmailStatusTask(govNotifyClient, statusService,
-                new TransientFailurePolicy(statusService), LEGACY_EMAIL_RETRY_DURATIONS);
+                new TransientFailurePolicy(statusService, new Clock(), LEGACY_EMAIL_RETRY_DURATIONS),
+                LEGACY_EMAIL_RETRY_DURATIONS);
     }
 
     @Test

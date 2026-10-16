@@ -1,0 +1,14 @@
+{
+  "email_address": "reports@example.com",
+  "template_id": "${templateId}",
+  "reference": "${notificationId}",
+  "personalisation": {
+    "recipient_name": "Alex Morgan",
+    "material_url": {
+      "file": "${json-unit.ignore}",
+      "filename": "${filename}",
+      "confirm_email_before_download": null,
+      "retention_period": null
+    }
+  }
+}
