@@ -26,7 +26,7 @@
 We will send the notification-notify system user's UUID as `CJSCPPUID` on the gateway's Material
 query.
 - The gateway reads it from env var `CP_NG_SYSTEM_USER_ID`, mapped by Flux `secretProvider` from
-  Key Vault secret `NOTIFICATIONNOTIFY-SYSTEM-USER-ID`. That secret is a per-environment copy of
+  Key Vault secret `CP-NG-SYSTEM-USER-ID`. That secret is a per-environment copy of
   Vault `secret/<env>/<stack>/system_users_notificationnotify_password`.
 - The app refuses to start if the value is missing or not a UUID, so the secret reaches each
   environment before or with the image.

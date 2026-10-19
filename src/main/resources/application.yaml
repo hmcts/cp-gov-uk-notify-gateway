@@ -68,7 +68,7 @@ cp:
         port: ${CP_NG_GOVNOTIFY_PROXY_PORT:0}
     material:
       system-user-id: ${CP_NG_SYSTEM_USER_ID:}
-      base-url: ${CP_NG_MATERIAL_BASE_URL:}
+      base-url: ${CP_NG_MATERIAL_BASE_URL:http://material-service-wildfly-app/material-service}
       connect-timeout: ${CP_NG_MATERIAL_CONNECT_TIMEOUT:5s}
       read-timeout: ${CP_NG_MATERIAL_READ_TIMEOUT:35s}
       sas-read-timeout: ${CP_NG_MATERIAL_SAS_READ_TIMEOUT:30s}
