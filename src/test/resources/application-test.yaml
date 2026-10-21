@@ -17,6 +17,9 @@ job:
 
 cp:
   notification:
+    office365:
+      endpoint: http://office365.invalid/api/Generate-Notification-Email
+      subscription-key: cpngtest-office365-subscription-key
     material:
       system-user-id: 0f0e0d0c-0b0a-4908-8706-050403020100
     retry:

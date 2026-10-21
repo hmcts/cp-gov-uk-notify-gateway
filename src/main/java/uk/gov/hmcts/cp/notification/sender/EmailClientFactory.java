@@ -7,7 +7,8 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class EmailClientFactory {
     // Gov.Notify rejects attachments over 2MB, so (per legacy) a larger attachment is routed to the
-    // Office 365 send path instead. Matches legacy BYTE_LENGTH_2_MB.
+    // Office 365 send path instead. Matches legacy BYTE_LENGTH_2_MB. Legacy's recipient-domain route
+    // (notify.email.sender.recipientDomainsToRouteThroughOffice365) is not ported (ADR-002 D14).
     /* default */ static final int GOV_NOTIFY_MAX_ATTACHMENT_2_MB = 2_097_152;
 
     private final GovNotifyClient govNotifyClient;

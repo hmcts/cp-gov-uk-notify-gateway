@@ -27,7 +27,7 @@ import uk.gov.hmcts.cp.notification.material.MaterialAttachmentException;
 import uk.gov.hmcts.cp.notification.sender.Attachment;
 import uk.gov.hmcts.cp.notification.sender.EmailSender;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
-import uk.gov.hmcts.cp.notification.sender.Office365NotYetSupportedException;
+import uk.gov.hmcts.cp.notification.sender.Office365Exception;
 import uk.gov.hmcts.cp.notification.service.NotificationStatusService;
 import uk.gov.hmcts.cp.notification.time.Clock;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
@@ -187,6 +187,28 @@ class SendEmailTaskTest {
             verifyNoInteractions(statusService);
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
+
+        @Test
+        void should_schedule_record_sent_with_the_email_details_instead_of_a_status_check_when_office365_has_sent_the_email() {
+            final UUID id = UUID.randomUUID();
+            when(emailSender.sendEmail(any(SendEmailCommand.class), any())).thenReturn(aSendResult()
+                    .reference(id.toString())
+                    .emailSubject("Your document is ready")
+                    .emailBody("Please find the document attached.")
+                    .replyToAddress("NOREPLY@noreply.com")
+                    .sentOnSubmit(true)
+                    .build());
+
+            final ExecutionInfo result = task.execute(sendEmailJob(id, ""));
+
+            verify(executionService).executeWith(executionInfoCaptor.capture());
+            final ExecutionInfo scheduled = executionInfoCaptor.getValue();
+            assertThat(scheduled.getAssignedTaskName()).isEqualTo(RecordSentTask.TASK_NAME);
+            assertThat(scheduled.getJobData().getString(RecordSentTask.KEY_NOTIFICATION_ID)).isEqualTo(id.toString());
+            assertThat(scheduled.getJobData().getString(RecordSentTask.KEY_EMAIL_SUBJECT)).isEqualTo("Your document is ready");
+            verifyNoInteractions(statusService);
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
+        }
     }
 
     @Nested
@@ -307,16 +329,57 @@ class SendEmailTaskTest {
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
 
-        @Test
-        void should_mark_failed_and_complete_when_the_attachment_requires_the_not_yet_supported_office365_route() {
+        @ParameterizedTest
+        @ValueSource(ints = {400, 413})
+        void should_mark_failed_and_complete_without_retry_when_office365_rejects_the_email(final int status) {
             final UUID id = UUID.randomUUID();
             when(emailSender.sendEmail(any(SendEmailCommand.class), any()))
-                    .thenThrow(new Office365NotYetSupportedException("Office 365 route not yet available"));
+                    .thenThrow(new Office365Exception(status, "Office 365 responded with 'Invalid request payload'", null));
 
             final ExecutionInfo result = task.execute(sendEmailJob(id, ""));
 
-            verify(statusService).markFailed(eq(id), eq(413), any());
+            verify(statusService).markFailed(id, status, "Office 365 responded with 'Invalid request payload'");
             verify(executionService, never()).executeWith(any());
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
+            assertThat(result.isShouldRetry()).isFalse();
+        }
+
+        @Test
+        void should_mark_failed_without_a_status_and_without_retry_when_the_office365_request_cannot_be_built() {
+            final UUID id = UUID.randomUUID();
+            when(emailSender.sendEmail(any(SendEmailCommand.class), any()))
+                    .thenThrow(Office365Exception.unsendable("Office 365 request could not be built", null));
+
+            final ExecutionInfo result = task.execute(sendEmailJob(id, ""));
+
+            verify(statusService).markFailed(id, null, "Office 365 request could not be built");
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
+            assertThat(result.isShouldRetry()).isFalse();
+        }
+
+        @Test
+        void should_retry_when_office365_fails_retryably() {
+            final UUID id = UUID.randomUUID();
+            when(emailSender.sendEmail(any(SendEmailCommand.class), any()))
+                    .thenThrow(new Office365Exception(null, "Office 365 could not be reached", null));
+
+            final ExecutionInfo result = task.execute(sendEmailJob(id, ""));
+
+            verify(statusService, never()).markFailed(any(), any(), any());
+            verify(statusService, never()).markSent(any(), any());
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
+            assertThat(result.isShouldRetry()).isTrue();
+        }
+
+        @Test
+        void should_mark_failed_with_the_last_status_when_office365_keeps_failing_until_retries_are_exhausted() {
+            final UUID id = UUID.randomUUID();
+            when(emailSender.sendEmail(any(SendEmailCommand.class), any()))
+                    .thenThrow(new Office365Exception(503, "Office 365 responded with 'unavailable'", null));
+
+            final ExecutionInfo result = task.execute(sendEmailJobWithRetriesRemaining(id, "", 0));
+
+            verify(statusService).markFailed(id, 503, "Office 365 send did not recover within the retry window");
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
 

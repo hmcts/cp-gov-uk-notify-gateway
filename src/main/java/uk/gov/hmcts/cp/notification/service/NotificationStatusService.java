@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import uk.gov.hmcts.cp.notification.persistence.NotificationEntity;
@@ -30,6 +31,19 @@ public class NotificationStatusService {
 
     @Transactional
     public void markSent(final UUID notificationId, final NotificationEmailDetails emailDetails) {
+        recordSent(notificationId, emailDetails);
+    }
+
+    /**
+     * Marks SENT in its own transaction, for {@code RecordSentTask}. A failure here then rolls back only this
+     * update, not the task's transaction, so the task can record its retry instead of being rolled back.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markSentInNewTransaction(final UUID notificationId, final NotificationEmailDetails emailDetails) {
+        recordSent(notificationId, emailDetails);
+    }
+
+    private void recordSent(final UUID notificationId, final NotificationEmailDetails emailDetails) {
         final NotificationEntity notification = getById(notificationId);
         notification.setStatus(STATUS_SENT);
         notification.setUpdatedAt(now());
