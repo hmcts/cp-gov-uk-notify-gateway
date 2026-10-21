@@ -1,0 +1,7 @@
+{
+  "templateId": "${templateId}",
+  "reference": "${notificationId}",
+  "subject": "Your document is ready",
+  "templateContent": "Your document is ready\n<p style=\"Margin: 0 0 20px 0; font-size: 19px;\">Please find the document attached.</p>",
+  "htmlBody": "<html><body><p>Please find the document attached.</p></body></html>"
+}

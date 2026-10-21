@@ -22,6 +22,17 @@ public class ResultEventSteps {
                 .withField("replyToAddress", "noreply@justice.gov.uk");
     }
 
+    @Then("a notification-sent result event for the Office 365 email is published to the originator's reply queue")
+    public void a_notification_sent_result_event_for_the_office365_email_is_published_to_the_reply_queue() {
+        aResultQueue(RESULT_QUEUE)
+                .receivesResultEvent()
+                .withSubject("public.notificationnotify.events.notification-sent")
+                .withField("notificationId", context.getNotificationId())
+                .withField("emailSubject", "Your document is ready")
+                .withField("emailBody", "Please find the document attached.")
+                .withField("replyToAddress", "NOREPLY@noreply.com");
+    }
+
     @Then("a notification-failed result event is published to the originator's reply queue")
     public void a_notification_failed_result_event_is_published_to_the_reply_queue() {
         aResultQueue(RESULT_QUEUE)

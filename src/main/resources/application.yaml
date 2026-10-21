@@ -52,7 +52,7 @@ cp:
       # Absolute max attachment size (bytes), matching legacy BYTE_LENGTH_15_MB. The attachment is
       # buffered whole into memory and its size is wire-influenced via the fileUri, so a larger blob is
       # rejected as a permanent failure BEFORE downloading (OOM guard). Note the 2MB Gov.Notify limit is
-      # a separate, lower routing threshold handled in EmailClientFactory (>2MB -> Office 365, NG-S10).
+      # a separate, lower routing threshold handled in EmailClientFactory (>2MB -> Office 365, ADR-004).
       max-attachment-bytes: ${CP_NG_BLOB_MAX_ATTACHMENT_BYTES:15728640}
     govnotify:
       base-url: ${CP_NG_GOVNOTIFY_BASE_URL:https://api.notifications.service.gov.uk}
@@ -66,6 +66,13 @@ cp:
         enabled: ${CP_NG_GOVNOTIFY_PROXY_ENABLED:false}
         host: ${CP_NG_GOVNOTIFY_PROXY_HOST:}
         port: ${CP_NG_GOVNOTIFY_PROXY_PORT:0}
+    office365:
+      endpoint: ${CP_NG_OFFICE365_ENDPOINT:}
+      subscription-key: ${CP_NG_OFFICE365_SUBSCRIPTION_KEY:}
+      # Bounded, unlike legacy (ADR-002 D13): the Function's front end drops a call after about 230s, so the
+      # request timeout sits above that; a timeout is retried like any I/O failure.
+      connect-timeout: ${CP_NG_OFFICE365_CONNECT_TIMEOUT:30s}
+      request-timeout: ${CP_NG_OFFICE365_REQUEST_TIMEOUT:300s}
     material:
       system-user-id: ${CP_NG_SYSTEM_USER_ID:}
       base-url: ${CP_NG_MATERIAL_BASE_URL:http://material-service-wildfly-app/material-service}

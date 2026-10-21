@@ -50,6 +50,24 @@ public class CpTaskFactory {
                 .build();
     }
 
+    public ExecutionInfo createRecordSentJob(final SendEmailCommand command, final SendResult sendResult) {
+        return ExecutionInfo.executionInfo()
+                .withJobData(recordSentJobData(command, sendResult))
+                .withAssignedTaskName(RecordSentTask.TASK_NAME)
+                .withAssignedTaskStartTime(clock.zonedDateTime())
+                .withExecutionStatus(ExecutionStatus.STARTED)
+                .build();
+    }
+
+    private JsonObject recordSentJobData(final SendEmailCommand command, final SendResult sendResult) {
+        final JsonObjectBuilder builder = jsonBuilderFactory.createObjectBuilder()
+                .add(RecordSentTask.KEY_NOTIFICATION_ID, command.notificationId().toString());
+        addIfPresent(builder, RecordSentTask.KEY_EMAIL_SUBJECT, sendResult.emailSubject());
+        addIfPresent(builder, RecordSentTask.KEY_EMAIL_BODY, sendResult.emailBody());
+        addIfPresent(builder, RecordSentTask.KEY_REPLY_TO_ADDRESS, sendResult.replyToAddress());
+        return builder.build();
+    }
+
     private JsonObject sendEmailJobData(final SendEmailCommand command) {
         final String json = objectMapper.writeValueAsString(command);
         try (JsonReader reader = jsonReaderFactory.createReader(new StringReader(json))) {

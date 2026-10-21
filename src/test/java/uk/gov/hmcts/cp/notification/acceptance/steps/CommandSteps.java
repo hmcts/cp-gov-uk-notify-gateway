@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 
 import uk.gov.hmcts.cp.notification.integration.stubs.GovUkNotifyStubService;
 import uk.gov.hmcts.cp.notification.integration.stubs.MaterialServiceStub;
+import uk.gov.hmcts.cp.notification.integration.stubs.Office365StubService;
 
 import static java.util.Map.of;
 import static java.util.UUID.randomUUID;
@@ -16,12 +17,14 @@ import static uk.gov.hmcts.cp.notification.integration.stubs.ASBTestClient.anAsb
 import static uk.gov.hmcts.cp.notification.integration.stubs.AzureBlobFileStoreStub.anAzureBlobFileStore;
 import static uk.gov.hmcts.cp.notification.integration.stubs.GovUkNotifyStubService.aGovUkNotifyService;
 import static uk.gov.hmcts.cp.notification.integration.stubs.MaterialServiceStub.aMaterialService;
+import static uk.gov.hmcts.cp.notification.integration.stubs.Office365StubService.anOffice365Service;
 import static uk.gov.hmcts.cp.notification.integration.stubs.support.ServiceBusContainerSupport.RESULT_QUEUE;
 
 public class CommandSteps {
     private static final String MATERIAL_DOCUMENT_FILENAME = "d20.pdf";
     private static final int HTTP_BAD_REQUEST = 400;
     private static final int HTTP_FORBIDDEN = 403;
+    private static final int OVER_GOV_NOTIFY_ATTACHMENT_LIMIT = 2_097_153;
 
     @Value("${cp.notification.blob.max-attachment-bytes}")
     private long maxAttachmentBytes;
@@ -31,6 +34,7 @@ public class CommandSteps {
 
     private final GovUkNotifyStubService govUkNotify = aGovUkNotifyService();
     private final MaterialServiceStub material = aMaterialService();
+    private final Office365StubService office365 = anOffice365Service();
 
     @Given("a send-email-notification command for a recipient with an attachment")
     public void a_send_email_notification_command_for_a_recipient_with_an_attachment() {
@@ -117,6 +121,16 @@ public class CommandSteps {
     public void a_send_email_notification_command_with_a_material_document_too_large_to_send() {
         aMaterialNotificationIsPrepared();
         material.documentLargerThanTheCapWillBeServed(context.getMaterialId(), MATERIAL_DOCUMENT_FILENAME, maxAttachmentBytes);
+        aCommandWithTheMaterialLink(material.materialClientLinkFor(context.getMaterialId()));
+    }
+
+    @Given("a send-email-notification command for a recipient with a Material document larger than Gov.UK Notify accepts")
+    public void a_send_email_notification_command_with_a_material_document_larger_than_gov_uk_notify_accepts() {
+        aMaterialNotificationIsPrepared();
+        final byte[] document = new byte[OVER_GOV_NOTIFY_ATTACHMENT_LIMIT];
+        context.setAttachmentBytes(document);
+        material.documentWillBeServed(context.getMaterialId(), MATERIAL_DOCUMENT_FILENAME, document);
+        office365.sendEmailWillReturnSuccess(context.getTemplateId(), context.getNotificationId());
         aCommandWithTheMaterialLink(material.materialClientLinkFor(context.getMaterialId()));
     }
 

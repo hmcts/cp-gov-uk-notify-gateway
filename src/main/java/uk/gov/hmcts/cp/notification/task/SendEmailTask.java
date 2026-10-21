@@ -17,7 +17,7 @@ import uk.gov.hmcts.cp.notification.sender.Attachment;
 import uk.gov.hmcts.cp.notification.sender.EmailSender;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyFailureClassifier;
-import uk.gov.hmcts.cp.notification.sender.Office365NotYetSupportedException;
+import uk.gov.hmcts.cp.notification.sender.Office365Exception;
 import uk.gov.hmcts.cp.notification.sender.SendResult;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
 import uk.gov.hmcts.cp.taskmanager.service.ExecutionService;
@@ -31,8 +31,6 @@ import java.util.Optional;
 @Component
 public class SendEmailTask implements ExecutableTask {
     public static final String TASK_NAME = "SEND_EMAIL";
-
-    private static final int HTTP_PAYLOAD_TOO_LARGE = 413;
 
     private static final Logger LOG = LoggerFactory.getLogger(SendEmailTask.class);
 
@@ -115,12 +113,14 @@ public class SendEmailTask implements ExecutableTask {
         ExecutionInfo result;
         try {
             final SendResult sendResult = emailSender.sendEmail(command, attachment);
-            executionService.executeWith(taskFactory.createCheckStatusJob(command, sendResult));
+            // Office 365 has already sent the email, so SENT is recorded by its own task (legacy: mark-as-sent
+            // command, no poll); Gov.Notify is polled. Either job commits with this task's completion.
+            executionService.executeWith(sendResult.sentOnSubmit()
+                    ? taskFactory.createRecordSentJob(command, sendResult)
+                    : taskFactory.createCheckStatusJob(command, sendResult));
             result = TransientFailurePolicy.completed(executionInfo);
-        } catch (final Office365NotYetSupportedException e) {
-            LOG.warn("Notification {} requires the Office 365 route (attachment > 2MB) which is not yet "
-                    + "available (NG-S10) — marking FAILED", command.notificationId());
-            result = failurePolicy.fail(command.notificationId(), HTTP_PAYLOAD_TOO_LARGE, e.getMessage(), executionInfo);
+        } catch (final Office365Exception e) {
+            result = office365SendFailed(command, e, executionInfo);
         } catch (final GovNotifyException e) {
             if (GovNotifyFailureClassifier.isTemporary(e.getHttpStatus(), e.getMessage())) {
                 result = failurePolicy.retryOrFail(command.notificationId(), e.getHttpStatus(),
@@ -130,6 +130,21 @@ public class SendEmailTask implements ExecutableTask {
                         command.notificationId(), e.getHttpStatus());
                 result = failurePolicy.fail(command.notificationId(), e.getHttpStatus(), e.getMessage(), executionInfo);
             }
+        }
+        return result;
+    }
+
+    private ExecutionInfo office365SendFailed(
+            final SendEmailCommand command, final Office365Exception failure, final ExecutionInfo executionInfo) {
+        final ExecutionInfo result;
+        if (failure.isPermanent()) {
+            LOG.warn("Permanent Office 365 send failure for notification {} (http {}) — marking FAILED",
+                    command.notificationId(), failure.getHttpStatus());
+            result = failurePolicy.fail(command.notificationId(), failure.getHttpStatus(), failure.getMessage(),
+                    executionInfo);
+        } else {
+            result = failurePolicy.retryOrFail(command.notificationId(), failure.getHttpStatus(),
+                    "Office 365 send did not recover within the retry window", executionInfo);
         }
         return result;
     }

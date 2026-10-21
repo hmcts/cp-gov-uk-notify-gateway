@@ -1,0 +1,12 @@
+{
+  "emailAddress": "reports@example.com",
+  "templateId": "${templateId}",
+  "reference": "${notificationId}",
+  "personalisation": {
+    "recipient_name": "Alex Morgan"
+  },
+  "attachment": {
+    "filename": "${filename}",
+    "content": "${json-unit.ignore}"
+  }
+}

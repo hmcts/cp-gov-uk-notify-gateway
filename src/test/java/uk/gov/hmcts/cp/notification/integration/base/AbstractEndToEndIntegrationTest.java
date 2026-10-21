@@ -6,6 +6,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import uk.gov.hmcts.cp.notification.integration.config.MaterialSasTestConfig;
 import uk.gov.hmcts.cp.notification.integration.stubs.MaterialServiceStub;
+import uk.gov.hmcts.cp.notification.integration.stubs.Office365StubService;
 import uk.gov.hmcts.cp.notification.integration.stubs.support.AzuriteContainerSupport;
 import uk.gov.hmcts.cp.notification.integration.stubs.GovUkNotifyStubService;
 import uk.gov.hmcts.cp.notification.integration.stubs.support.ServiceBusContainerSupport;
@@ -19,5 +20,6 @@ public abstract class AbstractEndToEndIntegrationTest extends AbstractIntegratio
         AzuriteContainerSupport.registerProperties(registry);
         GovUkNotifyStubService.registerProperties(registry);
         MaterialServiceStub.registerProperties(registry);
+        Office365StubService.registerProperties(registry);
     }
 }

@@ -60,6 +60,22 @@ class NotificationStatusServiceTest {
     }
 
     @Test
+    void marks_a_notification_sent_and_publishes_its_sent_event_when_recorded_in_a_new_transaction() {
+        final UUID id = UUID.randomUUID();
+        when(notificationRepository.findById(id)).thenReturn(Optional.of(aNotificationEntity()
+                .notificationId(id)
+                .resultQueue("originator-reply-queue")
+                .build()));
+
+        service.markSentInNewTransaction(id, EMAIL_DETAILS);
+
+        final ArgumentCaptor<NotificationEntity> saved = ArgumentCaptor.forClass(NotificationEntity.class);
+        verify(notificationRepository).save(saved.capture());
+        assertThat(saved.getValue().getStatus()).isEqualTo("SENT");
+        verify(resultEventPublisher).publish(eq("originator-reply-queue"), any(NotificationSentEvent.class));
+    }
+
+    @Test
     void marks_a_notification_failed_with_status_code_and_error_message() {
         final UUID id = UUID.randomUUID();
         when(notificationRepository.findById(id))

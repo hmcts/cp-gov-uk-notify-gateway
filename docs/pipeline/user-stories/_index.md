@@ -52,8 +52,8 @@ identity/RBAC, provisioning, deploy — NG-S05/07/08/09) carry no behavioural-pa
 | FR-015 | ASB namespace/queue provisioning + role assignments | [NG-S08](./NG-S08.md) | AC-025 | |
 | FR-016 | Postgres database/schema provisioning | [NG-S09](./NG-S09.md) | (no dedicated AC) | Bundled with FR-017 — deploy needs the DB first |
 | FR-017 | Flux CD GitOps deployment | [NG-S09](./NG-S09.md) | AC-026 | |
-| FR-018 | SenderFactory routing (cjsm.net / >2MB → O365) | [NG-S10](./NG-S10.md) | AC-027, AC-028, AC-029 | Bundled with FR-019 — routing with no working sender behind it has no value |
-| FR-019 | Office 365 immediate-delivery send | [NG-S10](./NG-S10.md) | AC-030 | |
+| FR-018 | SenderFactory routing (>2MB → O365; cjsm.net route not implemented, ADR-002 D14) | [NG-S10](./NG-S10.md) | AC-028, AC-029 (AC-027 descoped) | Bundled with FR-019 — routing with no working sender behind it has no value |
+| FR-019 | Office 365 immediate-delivery send (legacy notifyatt Function, ADR-004) | [NG-S10](./NG-S10.md) | AC-030, AC-040, AC-041 | AC-040/AC-041 added with the Office 365 send (after AC-039); not in requirements.md |
 | FR-020 | Failure handling: retry, permanent failure, DLQ | [NG-S11](./NG-S11.md) | AC-031, AC-032, AC-033 | Distinct from FR-022 — bounds *how long* retries continue |
 | FR-021 | *(removed by Stage 2 — dual-write atomicity resolved by co-located transaction; no reconciliation sweep needed)* | — | — | Not carried into Stage 3 |
 | FR-022 | At-least-once safety: state guard + Gov.Notify recover-by-reference | [NG-S12](./NG-S12.md) | AC-035, AC-036 | Distinct from FR-020 — prevents *double-acting* on retries |

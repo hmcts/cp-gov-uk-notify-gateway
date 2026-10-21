@@ -5,6 +5,7 @@ Feature: Email notification delivery
   through the notification provider and records the notification as sent. The
   attachment is either a file the originator stored or a document held by the
   Material service; when both are given, the Material document is attached. When
+  the attachment is larger than Gov.UK Notify accepts, the email is sent through Office 365 instead. When
   the attachment cannot be retrieved, the gateway fails the notification rather
   than sending a broken email; a Material document that is only briefly
   unavailable is retried, and the notification fails only once retries run out. When the originating context provides a reply
@@ -54,6 +55,16 @@ Feature: Email notification delivery
     And the Material document link is recorded on the notification
     And the notification is recorded as SENT
     And a notification-sent result event is published to the originator's reply queue
+
+  @regression
+  Scenario: A notification whose Material document is larger than Gov.UK Notify accepts is sent via Office 365 and its outcome returned to the originator
+    Given a send-email-notification command for a recipient with a Material document larger than Gov.UK Notify accepts
+    And the originator provides a reply queue
+    When the gateway processes the command
+    Then the email is sent via the Office 365 provider with the Material document attached
+    And no email is sent via the Gov.UK Notify provider
+    And the notification is recorded as SENT
+    And a notification-sent result event for the Office 365 email is published to the originator's reply queue
 
   @regression
   Scenario: A Material link that already points at the Material service is used as given

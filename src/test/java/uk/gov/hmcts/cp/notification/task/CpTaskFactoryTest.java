@@ -75,4 +75,26 @@ class CpTaskFactoryTest {
                 .contains("Please find your report attached.")
                 .contains("noreply@justice.gov.uk");
     }
+
+    @Test
+    void builds_a_record_sent_job_carrying_the_notification_id_and_the_email_details() {
+        final UUID id = UUID.randomUUID();
+
+        final ExecutionInfo job = taskFactory.createRecordSentJob(
+                aSendEmailCommand().notificationId(id).build(),
+                aSendResult()
+                        .emailSubject("Your document is ready")
+                        .emailBody("Please find the document attached.")
+                        .replyToAddress("NOREPLY@noreply.com")
+                        .sentOnSubmit(true)
+                        .build());
+
+        assertThat(job.getAssignedTaskName()).isEqualTo(RecordSentTask.TASK_NAME);
+        assertThat(job.getExecutionStatus()).isEqualTo(ExecutionStatus.STARTED);
+        assertThat(job.getAssignedTaskStartTime()).isEqualTo(FIXED_START_TIME);
+        assertThat(job.getJobData().getString(RecordSentTask.KEY_NOTIFICATION_ID)).isEqualTo(id.toString());
+        assertThat(job.getJobData().getString(RecordSentTask.KEY_EMAIL_SUBJECT)).isEqualTo("Your document is ready");
+        assertThat(job.getJobData().getString(RecordSentTask.KEY_EMAIL_BODY)).isEqualTo("Please find the document attached.");
+        assertThat(job.getJobData().getString(RecordSentTask.KEY_REPLY_TO_ADDRESS)).isEqualTo("NOREPLY@noreply.com");
+    }
 }
