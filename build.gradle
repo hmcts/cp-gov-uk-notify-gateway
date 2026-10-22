@@ -69,7 +69,7 @@ dependencies {
   implementation 'org.apache.tomcat.embed:tomcat-embed-core:11.0.27'
 
   // HTML-to-text of the Office 365 response's template body for the notification-sent event (legacy parity)
-  implementation 'org.jsoup:jsoup:1.21.1'
+  implementation 'org.jsoup:jsoup:1.23.2'
 
   // --- Persistence: JPA + Postgres + Flyway (NG-S01) ---
   implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
