@@ -11,6 +11,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import java.time.Duration;
 import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
+import uk.gov.hmcts.cp.notification.command.SendLetterCommand;
 import uk.gov.hmcts.cp.notification.integration.stubs.support.ServiceBusContainerSupport;
 
 public final class ASBTestClient {
@@ -31,8 +32,20 @@ public final class ASBTestClient {
         return new ASBTestClient(queueName);
     }
 
+    public static ASBTestClient aLetterAsbTestClient() {
+        return new ASBTestClient(ServiceBusContainerSupport.LETTER_COMMAND_QUEUE);
+    }
+
     public ASBTestClient sendToCommandQueue(final SendEmailCommand command) {
         return sendToCommandQueue(MAPPER.writeValueAsString(command));
+    }
+
+    public ASBTestClient sendToCommandQueue(final SendLetterCommand command) {
+        return sendToCommandQueue(MAPPER.writeValueAsString(command));
+    }
+
+    public ASBTestClient sendToCommandQueue(final SendLetterCommand command, final String replyTo) {
+        return sendToCommandQueue(MAPPER.writeValueAsString(command), replyTo);
     }
 
     public ASBTestClient sendToCommandQueue(final SendEmailCommand command, final String replyTo) {

@@ -18,6 +18,7 @@ public final class ContractSchema {
     public static final String NOTIFICATION_SENT = "notification-sent.schema.json";
     public static final String NOTIFICATION_FAILED = "notification-failed.schema.json";
     public static final String SEND_EMAIL_COMMAND = "command-send-email-notification.schema.json";
+    public static final String SEND_LETTER_COMMAND = "command-send-letter-notification.schema.json";
 
     private static final Path CONTRACTS_DIR = Path.of("contracts");
     private static final JsonSchemaFactory FACTORY =

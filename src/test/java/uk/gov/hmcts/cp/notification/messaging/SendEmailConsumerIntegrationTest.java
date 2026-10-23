@@ -4,17 +4,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
-import uk.gov.hmcts.cp.notification.integration.config.AsbConsumerSliceConfig;
+import uk.gov.hmcts.cp.notification.integration.base.AbstractAsbConsumerSliceTest;
 import uk.gov.hmcts.cp.notification.integration.stubs.ASBTestClient;
 import uk.gov.hmcts.cp.notification.integration.stubs.support.ServiceBusContainerSupport;
-import uk.gov.hmcts.cp.notification.service.NotificationIngestionService;
 
 import java.time.Duration;
 import java.util.Map;
@@ -38,19 +32,9 @@ import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommand
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.aSendEmailCommand;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.aSendEmailCommandWithMaterialUrl;
 
-@SpringBootTest(classes = AsbConsumerSliceConfig.class)
-@ActiveProfiles("test")
-class SendEmailConsumerIntegrationTest {
+class SendEmailConsumerIntegrationTest extends AbstractAsbConsumerSliceTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
-
-    @DynamicPropertySource
-    static void serviceBusProperties(final DynamicPropertyRegistry registry) {
-        ServiceBusContainerSupport.registerProperties(registry, ServiceBusContainerSupport.SLICE_COMMAND_QUEUE);
-    }
-
-    @MockitoBean
-    private NotificationIngestionService ingestionService;
 
     private final ASBTestClient asb = anAsbTestClient(ServiceBusContainerSupport.SLICE_COMMAND_QUEUE);
 
@@ -129,11 +113,12 @@ class SendEmailConsumerIntegrationTest {
 
         @Test
         void abandons_and_redelivers_the_message_when_ingestion_fails() {
-            doThrow(new IllegalStateException("ingestion failed")).when(ingestionService).ingest(any(), any());
+            doThrow(new IllegalStateException("ingestion failed")).when(ingestionService)
+                    .ingest(any(SendEmailCommand.class), any());
 
             asb.sendToCommandQueue(aSendEmailCommand().notificationId(UUID.randomUUID()).build());
 
-            verify(ingestionService, timeout(TIMEOUT.toMillis()).atLeast(2)).ingest(any(), any());
+            verify(ingestionService, timeout(TIMEOUT.toMillis()).atLeast(2)).ingest(any(SendEmailCommand.class), any());
             await().atMost(TIMEOUT).until(() -> asb.peekDeadLetter() != null);
         }
     }

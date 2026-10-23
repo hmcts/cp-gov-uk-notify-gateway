@@ -1,0 +1,5 @@
+{
+  "id": "${externalReference}",
+  "reference": "letter-reference",
+  "postage": "second"
+}

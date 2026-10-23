@@ -3,6 +3,8 @@ package uk.gov.hmcts.cp.notification.acceptance.steps;
 import io.cucumber.spring.ScenarioScope;
 import org.springframework.stereotype.Component;
 
+import uk.gov.hmcts.cp.notification.integration.stubs.support.ServiceBusContainerSupport;
+
 @Component
 @ScenarioScope
 public class ScenarioContext {
@@ -16,6 +18,24 @@ public class ScenarioContext {
     private String attachmentFilename;
     private String materialId;
     private String materialUrl;
+    private String commandQueue = ServiceBusContainerSupport.COMMAND_QUEUE;
+    private boolean firstClass;
+
+    public String getCommandQueue() {
+        return commandQueue;
+    }
+
+    public void setCommandQueue(final String commandQueue) {
+        this.commandQueue = commandQueue;
+    }
+
+    public boolean isFirstClass() {
+        return firstClass;
+    }
+
+    public void setFirstClass(final boolean firstClass) {
+        this.firstClass = firstClass;
+    }
 
     public String getNotificationId() {
         return notificationId;

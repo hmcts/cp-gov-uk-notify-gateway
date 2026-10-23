@@ -59,6 +59,39 @@ public class CpTaskFactory {
                 .build();
     }
 
+    public ExecutionInfo createSendLetterJob(final LetterJob letter) {
+        return newJob(SendLetterTask.TASK_NAME, letterJobData(letter).build());
+    }
+
+    public ExecutionInfo createCheckLetterStatusJob(final LetterJob letter, final String reference) {
+        return newJob(CheckLetterStatusTask.TASK_NAME, letterJobData(letter)
+                .add(CheckLetterStatusTask.KEY_REFERENCE, reference)
+                .build());
+    }
+
+    public ExecutionInfo createCheckAcceptedLetterStatusJob(final LetterJob letter, final String reference) {
+        return newJob(CheckAcceptedLetterStatusTask.TASK_NAME, letterJobData(letter)
+                .add(CheckLetterStatusTask.KEY_REFERENCE, reference)
+                .build());
+    }
+
+    private ExecutionInfo newJob(final String taskName, final JsonObject jobData) {
+        return ExecutionInfo.executionInfo()
+                .withJobData(jobData)
+                .withAssignedTaskName(taskName)
+                .withAssignedTaskStartTime(clock.zonedDateTime())
+                .withExecutionStatus(ExecutionStatus.STARTED)
+                .build();
+    }
+
+    private JsonObjectBuilder letterJobData(final LetterJob letter) {
+        return jsonBuilderFactory.createObjectBuilder()
+                .add(LetterJob.KEY_NOTIFICATION_ID, letter.notificationId().toString())
+                .add(LetterJob.KEY_LETTER_URL, letter.letterUrl())
+                .add(LetterJob.KEY_FIRST_CLASS, letter.firstClass())
+                .add(LetterJob.KEY_RESEND_ATTEMPTS_REMAINING, letter.resendAttemptsRemaining());
+    }
+
     private JsonObject recordSentJobData(final SendEmailCommand command, final SendResult sendResult) {
         final JsonObjectBuilder builder = jsonBuilderFactory.createObjectBuilder()
                 .add(RecordSentTask.KEY_NOTIFICATION_ID, command.notificationId().toString());

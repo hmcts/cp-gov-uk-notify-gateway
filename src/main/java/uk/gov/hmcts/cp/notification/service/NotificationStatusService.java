@@ -22,6 +22,7 @@ import java.util.UUID;
 public class NotificationStatusService {
     private static final String STATUS_SENT = "SENT";
     private static final String STATUS_FAILED = "FAILED";
+    private static final String STATUS_REQUEUED = "REQUEUED";
 
     private static final Logger LOG = LoggerFactory.getLogger(NotificationStatusService.class);
 
@@ -49,7 +50,44 @@ public class NotificationStatusService {
         notification.setUpdatedAt(now());
         notificationRepository.save(notification);
         LOG.info("Notification {} marked SENT", notificationId);
-        publishSent(notification, emailDetails);
+        resultEventPublisher.publish(notification.getResultQueue(), sentEvent(notification)
+                .sendToAddress(notification.getSendToAddress())
+                .emailSubject(emailDetails.emailSubject())
+                .emailBody(emailDetails.emailBody())
+                .replyToAddress(emailDetails.replyToAddress())
+                .build());
+    }
+
+    /**
+     * Marks a letter SENT once Gov.Notify has received it. Legacy parity: the sent event carries
+     * {@code completedAt} (the time it was recorded) and none of the email fields.
+     */
+    @Transactional
+    public void markLetterSent(final UUID notificationId) {
+        final NotificationEntity notification = getById(notificationId);
+        notification.setStatus(STATUS_SENT);
+        notification.setUpdatedAt(now());
+        notificationRepository.save(notification);
+        LOG.info("Letter notification {} marked SENT", notificationId);
+        resultEventPublisher.publish(notification.getResultQueue(), sentEvent(notification)
+                .completedAt(notification.getUpdatedAt())
+                .build());
+    }
+
+    /**
+     * Marks a letter REQUEUED when Gov.Notify failed its validation and it is being sent again (legacy
+     * {@code letter-queued-for-resend}). Like legacy, any earlier error is cleared. No result event: the
+     * originator hears only the final outcome.
+     */
+    @Transactional
+    public void markRequeued(final UUID notificationId) {
+        final NotificationEntity notification = getById(notificationId);
+        notification.setStatus(STATUS_REQUEUED);
+        notification.setStatusCode(null);
+        notification.setErrorMessage(null);
+        notification.setUpdatedAt(now());
+        notificationRepository.save(notification);
+        LOG.info("Letter notification {} marked REQUEUED", notificationId);
     }
 
     @Transactional
@@ -64,16 +102,11 @@ public class NotificationStatusService {
         publishFailed(notification);
     }
 
-    private void publishSent(final NotificationEntity notification, final NotificationEmailDetails emailDetails) {
-        resultEventPublisher.publish(notification.getResultQueue(), NotificationSentEvent.builder()
+    private static NotificationSentEvent.NotificationSentEventBuilder sentEvent(final NotificationEntity notification) {
+        return NotificationSentEvent.builder()
                 .notificationId(notification.getNotificationId())
                 .sentTime(notification.getUpdatedAt())
-                .sendToAddress(notification.getSendToAddress())
-                .emailSubject(emailDetails.emailSubject())
-                .emailBody(emailDetails.emailBody())
-                .replyToAddress(emailDetails.replyToAddress())
-                .clientContext(notification.getClientContext())
-                .build());
+                .clientContext(notification.getClientContext());
     }
 
     private void publishFailed(final NotificationEntity notification) {
