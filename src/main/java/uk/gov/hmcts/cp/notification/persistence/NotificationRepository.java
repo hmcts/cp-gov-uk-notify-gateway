@@ -27,4 +27,21 @@ public interface NotificationRepository extends JpaRepository<NotificationEntity
                        @Param("materialUrl") String materialUrl,
                        @Param("createdAt") OffsetDateTime createdAt,
                        @Param("updatedAt") OffsetDateTime updatedAt);
+
+    // The letter equivalent of insertIfAbsent: a letter has a letter_url and no recipient address.
+    @Modifying
+    @Query(value = "insert into notification "
+            + "(notification_id, notification_type, status, client_context, "
+            + "result_queue, letter_url, created_at, updated_at) "
+            + "values (:id, :type, :status, :clientContext, "
+            + ":resultQueue, :letterUrl, :createdAt, :updatedAt) "
+            + "on conflict (notification_id) do nothing", nativeQuery = true)
+    int insertLetterIfAbsent(@Param("id") UUID id,
+                             @Param("type") String type,
+                             @Param("status") String status,
+                             @Param("clientContext") String clientContext,
+                             @Param("resultQueue") String resultQueue,
+                             @Param("letterUrl") String letterUrl,
+                             @Param("createdAt") OffsetDateTime createdAt,
+                             @Param("updatedAt") OffsetDateTime updatedAt);
 }

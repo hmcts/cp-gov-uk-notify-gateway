@@ -2,17 +2,22 @@ package uk.gov.hmcts.cp.notification.sender;
 
 import org.springframework.stereotype.Component;
 
+import uk.gov.service.notify.LetterResponse;
 import uk.gov.service.notify.Notification;
 import uk.gov.service.notify.NotificationClient;
 import uk.gov.service.notify.NotificationClientException;
 import uk.gov.service.notify.SendEmailResponse;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 @Component
 public class GovNotifyClient implements EmailClient {
     private static final String MATERIAL_URL = "material_url";
+    private static final String FIRST_CLASS_POSTAGE = "first";
 
     private final NotificationClient notificationClient;
 
@@ -35,6 +40,25 @@ public class GovNotifyClient implements EmailClient {
                     .emailBody(response.getBody())
                     .replyToAddress(fromEmail(response))
                     .build();
+        } catch (final NotificationClientException e) {
+            throw new GovNotifyException(e.getHttpResult(), e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Sends a precompiled PDF letter with the CPP notification id as its reference, as legacy did, and returns
+     * Gov.Notify's id for the letter, which is what the status poll asks about. A first-class letter says so;
+     * any other letter sends no postage, so Gov.Notify uses its default (second class).
+     */
+    public String sendPrecompiledLetter(final UUID notificationId, final byte[] pdf, final boolean firstClass) {
+        // The document is already in memory (the Material download buffers it), so there is nothing to close.
+        final InputStream document = new ByteArrayInputStream(pdf);
+        try {
+            final LetterResponse response = firstClass
+                    ? notificationClient.sendPrecompiledLetterWithInputStream(
+                            notificationId.toString(), document, FIRST_CLASS_POSTAGE)
+                    : notificationClient.sendPrecompiledLetterWithInputStream(notificationId.toString(), document);
+            return response.getNotificationId().toString();
         } catch (final NotificationClientException e) {
             throw new GovNotifyException(e.getHttpResult(), e.getMessage(), e);
         }

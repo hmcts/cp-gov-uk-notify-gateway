@@ -21,4 +21,11 @@ public final class NotificationEntityFactory {
                 .createdAt(now)
                 .updatedAt(now);
     }
+
+    public static NotificationEntity.NotificationEntityBuilder aLetterNotificationEntity() {
+        return aNotificationEntity()
+                .notificationType("LETTER")
+                .sendToAddress(null)
+                .letterUrl(SendLetterCommandFactory.LETTER_URL);
+    }
 }

@@ -37,6 +37,8 @@ cp:
       # Fully-qualified namespace, e.g. my-namespace.servicebus.windows.net (Managed Identity path).
       namespace: ${CP_NG_SERVICEBUS_NAMESPACE:}
       command-queue: ${CP_NG_SERVICEBUS_COMMAND_QUEUE:ng-send-email}
+      # send-letter-notification commands arrive on their own queue (one queue per command type).
+      letter-command-queue: ${CP_NG_SERVICEBUS_LETTER_COMMAND_QUEUE:ng-send-letter}
       # Messages processed in parallel per pod (legacy MDB maxSession=15).
       max-concurrent-calls: ${CP_NG_SERVICEBUS_MAX_CONCURRENT_CALLS:15}
     blob:
@@ -83,6 +85,14 @@ cp:
       # Preserved legacy email retry/poll backoff (seconds); legacy default from
       # notify.email.retry.threshold.durations. Overridable per environment without a redeploy.
       email-durations-secs: ${CP_NG_EMAIL_RETRY_DURATIONS_SECS:60,300,1800,3600,7200,14400}
+      # Preserved legacy letter backoffs (seconds). Sending: notify.letter.retry.threshold.durations.
+      letter-durations-secs: ${CP_NG_LETTER_RETRY_DURATIONS_SECS:60,300,1800,3600,7200,14400,14400}
+      # Polling until Gov.Notify accepts the letter. Legacy names this one
+      # notify.letter.accepted.retry.threshold.durations.
+      letter-status-durations-secs: ${CP_NG_LETTER_STATUS_RETRY_DURATIONS_SECS:60,300,1800,3600,7200,14400}
+      # Polling an accepted letter until Gov.Notify has received it: every 12 hours, 16 times (about 8 days).
+      # Legacy names this one notify.letter.received.retry.threshold.durations.
+      letter-accepted-status-durations-secs: ${CP_NG_LETTER_ACCEPTED_STATUS_RETRY_DURATIONS_SECS:43200,43200,43200,43200,43200,43200,43200,43200,43200,43200,43200,43200,43200,43200,43200,43200}
 
 management:
   endpoints:

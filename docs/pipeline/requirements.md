@@ -330,8 +330,9 @@ Required set (`notificationId`, `templateId`, `sendToAddress`) and `additionalPr
 
 - **Producer-side changes in `cpp-context-mi-reportdata`** (feature toggle `useServiceBus`, CSV upload
   to blob, ASB publish, its own RBAC) — separate repo; referenced only as the triggering dependency.
-- **Letters** (`send-letter` + accepted/received long-poll + invalid-resend), and the ex-aggregate
-  columns those need (`resend_attempts_remaining`, `postage`).
+- ~~**Letters** (`send-letter` + accepted/received long-poll + invalid-resend)~~ — now implemented: see
+  ADR-002 D15/D16. The ex-aggregate state (postage, resends remaining) travels in the letter tasks' job
+  data rather than in `resend_attempts_remaining` / `postage` columns; only `letter_url` was added (V1002).
 - **Bounced-email detection and POCA inbound mailbox flows** (IMAP pollers, `bounced_email_notified`,
   `poca_email` table), and their `@Scheduled` triggers.
 - **Other originator contexts** and the topic → per-consumer queue cutover, `SystemIdMapper` removal

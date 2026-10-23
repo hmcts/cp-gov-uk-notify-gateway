@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.util.UUID;
 
 import uk.gov.hmcts.cp.notification.integration.Fixtures;
+import uk.gov.hmcts.cp.notification.integration.stubs.support.ContractSchema;
 
 import static net.javacrumbs.jsonunit.assertj.JsonAssertions.assertThatJson;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -46,6 +47,21 @@ public final class ResultQueueStubService {
 
     public ResultQueueStubService withField(final String jsonPath, final Object expectedValue) {
         assertThatJson(body()).node(jsonPath).isEqualTo(expectedValue);
+        return this;
+    }
+
+    public ResultQueueStubService withFieldPresent(final String jsonPath) {
+        assertThatJson(body()).node(jsonPath).isPresent();
+        return this;
+    }
+
+    public ResultQueueStubService withFieldAbsent(final String jsonPath) {
+        assertThatJson(body()).node(jsonPath).isAbsent();
+        return this;
+    }
+
+    public ResultQueueStubService conformsTo(final String contractSchema) {
+        ContractSchema.assertConformsTo(contractSchema, body());
         return this;
     }
 

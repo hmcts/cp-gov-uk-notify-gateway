@@ -56,4 +56,58 @@ public class GovNotifySteps {
     public void no_email_is_sent_via_the_gov_uk_notify_provider() {
         govUkNotify.emailNotificationWasNotSent();
     }
+
+    @Given("the provider accepts the letter before receiving it")
+    public void the_provider_accepts_the_letter_before_receiving_it() {
+        govUkNotify.letterStatusWillMoveThrough(context.getExternalReference(), "accepted", "accepted", "received");
+    }
+
+    @Given("the provider is still processing the letter before receiving it")
+    public void the_provider_is_still_processing_the_letter_before_receiving_it() {
+        govUkNotify.letterStatusWillMoveThrough(context.getExternalReference(), "sending", "pending-virus-check", "received");
+    }
+
+    @Given("the provider fails the letter's validation once before receiving it")
+    public void the_provider_fails_the_letters_validation_once_before_receiving_it() {
+        govUkNotify.letterStatusWillMoveThrough(context.getExternalReference(), "validation-failed", "received");
+    }
+
+    @Given("the provider fails the letter's validation every time")
+    public void the_provider_fails_the_letters_validation_every_time() {
+        govUkNotify.letterStatusWillBe(context.getExternalReference(), "validation-failed");
+    }
+
+    @Given("the provider reports the letter as permanently failed")
+    public void the_provider_reports_the_letter_as_permanently_failed() {
+        govUkNotify.letterStatusWillBe(context.getExternalReference(), "permanent-failure");
+    }
+
+    @Given("the provider rejects the letter as invalid")
+    public void the_provider_rejects_the_letter_as_invalid() {
+        govUkNotify.sendLetterWillFail(400, "precompiledPDF must be a valid PDF file");
+    }
+
+    @Given("the provider is unavailable for letters")
+    public void the_provider_is_unavailable_for_letters() {
+        govUkNotify.sendLetterWillFail(500, "Internal server error");
+    }
+
+    @Then("the letter is sent via the Gov.UK Notify provider")
+    public void the_letter_is_sent_via_the_gov_uk_notify_provider() {
+        final String notificationId = context.getNotificationId();
+        final byte[] document = context.getAttachmentBytes();
+        final boolean firstClass = context.isFirstClass();
+        await().atMost(ofSeconds(60))
+                .untilAsserted(() -> govUkNotify.sendLetterRequestMatches(notificationId, document, firstClass));
+    }
+
+    @Then("the letter is sent to the Gov.UK Notify provider {int} times")
+    public void the_letter_is_sent_to_the_gov_uk_notify_provider_times(final int times) {
+        await().atMost(ofSeconds(60)).untilAsserted(() -> govUkNotify.letterWasSentTimes(times));
+    }
+
+    @Then("no letter is sent via the Gov.UK Notify provider")
+    public void no_letter_is_sent_via_the_gov_uk_notify_provider() {
+        govUkNotify.letterWasNotSent();
+    }
 }
