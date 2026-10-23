@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hmcts:cp:cp-gov-uk-notify-gateway.send-letter-notification",
+  "title": "cp-gov-uk-notify-gateway send-letter-notification",
+  "description": "Inbound ASB command contract consumed by cp-gov-uk-notify-gateway (the SendLetterCommand body on the ng-send-letter command queue). Ported from the legacy cpp-context-notification-notify command schema — see command-send-letter-notification-legacy.schema.json for the legacy contract to diff against. Delta from legacy: none in the fields — notificationId (taken from the REST path by the legacy command API) and letterUrl are required, postage and clientContext are optional, with the same names and types. letterUrl is a Material document link (the link MaterialUrlGenerator.pdfFileStreamUrlFor builds); the gateway resolves it onto the Material service and downloads the PDF through Material, and refuses a link to any other host (ADR-002 D15). postage 'first' (any case) sends a first-class letter; anything else, or none, sends Gov.Notify's default. The inbound ASB ReplyTo message property (captured into notification.result_queue) travels in the message envelope, not this body. Additive-only evolution.",
+  "type": "object",
+  "required": [
+    "notificationId",
+    "letterUrl"
+  ],
+
+  "properties": {
+    "notificationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "letterUrl": {
+      "type": "string",
+      "format": "uri"
+    },
+    "postage": {
+      "type": "string"
+    },
+    "clientContext": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

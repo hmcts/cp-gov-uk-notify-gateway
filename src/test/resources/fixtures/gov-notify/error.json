@@ -1,0 +1,9 @@
+{
+  "errors": [
+    {
+      "error": "BadRequestError",
+      "message": "${message}"
+    }
+  ],
+  "status_code": ${status}
+}

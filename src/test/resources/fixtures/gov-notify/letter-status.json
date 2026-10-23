@@ -1,0 +1,12 @@
+{
+  "id": "${externalReference}",
+  "type": "letter",
+  "status": "${status}",
+  "template": {
+    "id": "00000000-0000-0000-0000-000000000000",
+    "version": 1,
+    "uri": "https://api.notifications.service.gov.uk/services/x/templates/x"
+  },
+  "body": "",
+  "created_at": "2026-10-23T10:15:30.000Z"
+}
