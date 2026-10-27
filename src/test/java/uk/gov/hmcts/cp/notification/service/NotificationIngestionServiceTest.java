@@ -12,6 +12,7 @@ import tools.jackson.databind.json.JsonMapper;
 import uk.gov.hmcts.cp.notification.persistence.NotificationRepository;
 import uk.gov.hmcts.cp.notification.task.CpTaskFactory;
 import uk.gov.hmcts.cp.notification.task.SendEmailTask;
+import uk.gov.hmcts.cp.notification.task.SendLetterTask;
 import uk.gov.hmcts.cp.notification.time.Clock;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
 import uk.gov.hmcts.cp.taskmanager.service.ExecutionService;
@@ -29,6 +30,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.MATERIAL_URL;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.aSendEmailCommand;
+import static uk.gov.hmcts.cp.notification.integration.testdata.SendLetterCommandFactory.LETTER_URL;
+import static uk.gov.hmcts.cp.notification.integration.testdata.SendLetterCommandFactory.aFirstClassSendLetterCommand;
+import static uk.gov.hmcts.cp.notification.integration.testdata.SendLetterCommandFactory.aSendLetterCommand;
 
 @ExtendWith(MockitoExtension.class)
 class NotificationIngestionServiceTest {
@@ -94,6 +98,53 @@ class NotificationIngestionServiceTest {
 
         assertThatThrownBy(() -> service.ingest(aSendEmailCommand().notificationId(id).build(), null))
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void persists_a_queued_letter_and_enqueues_a_send_letter_task_with_five_resends() {
+        final UUID id = UUID.randomUUID();
+        when(notificationRepository.insertLetterIfAbsent(eq(id), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(1);
+
+        service.ingest(aFirstClassSendLetterCommand()
+                .notificationId(id)
+                .clientContext("correspondence")
+                .build(), "ng-result-correspondence");
+
+        verify(notificationRepository).insertLetterIfAbsent(eq(id), eq("LETTER"), eq("QUEUED"), eq("correspondence"),
+                eq("ng-result-correspondence"), eq(LETTER_URL), any(), any());
+
+        final ArgumentCaptor<ExecutionInfo> job = ArgumentCaptor.forClass(ExecutionInfo.class);
+        verify(executionService).executeWith(job.capture());
+        assertThat(job.getValue().getAssignedTaskName()).isEqualTo(SendLetterTask.TASK_NAME);
+        assertThat(job.getValue().getJobData().getString("notificationId")).isEqualTo(id.toString());
+        assertThat(job.getValue().getJobData().getString("letterUrl")).isEqualTo(LETTER_URL);
+        assertThat(job.getValue().getJobData().getBoolean("firstClass")).isTrue();
+        assertThat(job.getValue().getJobData().getInt("resendAttemptsRemaining")).isEqualTo(5);
+    }
+
+    @Test
+    void enqueues_a_letter_with_no_postage_as_not_first_class() {
+        final UUID id = UUID.randomUUID();
+        when(notificationRepository.insertLetterIfAbsent(eq(id), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(1);
+
+        service.ingest(aSendLetterCommand().notificationId(id).postage(null).build(), null);
+
+        final ArgumentCaptor<ExecutionInfo> job = ArgumentCaptor.forClass(ExecutionInfo.class);
+        verify(executionService).executeWith(job.capture());
+        assertThat(job.getValue().getJobData().getBoolean("firstClass")).isFalse();
+    }
+
+    @Test
+    void is_an_idempotent_no_op_for_a_duplicate_letter_notification_id() {
+        final UUID id = UUID.randomUUID();
+        when(notificationRepository.insertLetterIfAbsent(eq(id), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(0);
+
+        service.ingest(aSendLetterCommand().notificationId(id).build(), null);
+
+        verify(executionService, never()).executeWith(any());
     }
 
     @Test

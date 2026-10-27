@@ -35,6 +35,27 @@ public class ServiceBusConfig {
         return client;
     }
 
+    // One command queue per command type (architecture-design: "shared command queue per command type").
+    @Bean(destroyMethod = "close")
+    /* default */ ServiceBusProcessorClient sendLetterProcessorClient(
+            @Value("${cp.notification.servicebus.connection-string:}") final String connectionString,
+            @Value("${cp.notification.servicebus.namespace:}") final String namespace,
+            @Value("${cp.notification.servicebus.letter-command-queue}") final String letterCommandQueue,
+            @Value("${cp.notification.servicebus.max-concurrent-calls:15}") final int maxConcurrentCalls,
+            final SendLetterConsumer consumer) {
+        final ServiceBusProcessorClient client = authenticate(new ServiceBusClientBuilder(), connectionString, namespace)
+                .processor()
+                .queueName(letterCommandQueue)
+                .maxConcurrentCalls(maxConcurrentCalls)
+                .disableAutoComplete()
+                .processMessage(consumer::processMessage)
+                .processError(consumer::processError)
+                .buildProcessorClient();
+
+        client.start();
+        return client;
+    }
+
     private static ServiceBusClientBuilder authenticate(
             final ServiceBusClientBuilder builder, final String connectionString, final String namespace) {
         final ServiceBusClientBuilder authenticated;

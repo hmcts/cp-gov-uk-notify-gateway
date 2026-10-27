@@ -27,6 +27,18 @@ public class NotificationDatabaseSteps {
                         .hasValueSatisfying(row -> assertThat(row.getMaterialUrl()).isEqualTo(materialUrl)));
     }
 
+    @Then("the notification is recorded as a letter with its letter link")
+    public void the_notification_is_recorded_as_a_letter_with_its_letter_link() {
+        final String notificationId = context.getNotificationId();
+        final String letterUrl = context.getMaterialUrl();
+        await().atMost(ofSeconds(60)).untilAsserted(() ->
+                assertThat(notifications.findById(fromString(notificationId))).hasValueSatisfying(row -> {
+                    assertThat(row.getNotificationType()).isEqualTo("LETTER");
+                    assertThat(row.getLetterUrl()).isEqualTo(letterUrl);
+                    assertThat(row.getSendToAddress()).isNull();
+                }));
+    }
+
     @Then("the notification is recorded as {word}")
     public void the_notification_is_recorded_as(final String status) {
         final String notificationId = context.getNotificationId();

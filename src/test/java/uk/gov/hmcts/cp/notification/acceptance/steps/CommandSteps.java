@@ -18,12 +18,15 @@ import static uk.gov.hmcts.cp.notification.integration.stubs.AzureBlobFileStoreS
 import static uk.gov.hmcts.cp.notification.integration.stubs.GovUkNotifyStubService.aGovUkNotifyService;
 import static uk.gov.hmcts.cp.notification.integration.stubs.MaterialServiceStub.aMaterialService;
 import static uk.gov.hmcts.cp.notification.integration.stubs.Office365StubService.anOffice365Service;
+import static uk.gov.hmcts.cp.notification.integration.stubs.support.ServiceBusContainerSupport.LETTER_COMMAND_QUEUE;
 import static uk.gov.hmcts.cp.notification.integration.stubs.support.ServiceBusContainerSupport.RESULT_QUEUE;
 
 public class CommandSteps {
     private static final String MATERIAL_DOCUMENT_FILENAME = "d20.pdf";
+    private static final String LETTER_FILENAME = "letter.pdf";
     private static final int HTTP_BAD_REQUEST = 400;
     private static final int HTTP_FORBIDDEN = 403;
+    private static final int HTTP_INTERNAL_SERVER_ERROR = 500;
     private static final int OVER_GOV_NOTIFY_ATTACHMENT_LIMIT = 2_097_153;
 
     @Value("${cp.notification.blob.max-attachment-bytes}")
@@ -161,9 +164,56 @@ public class CommandSteps {
         context.setReplyQueue(RESULT_QUEUE);
     }
 
+    @Given("a send-letter-notification command for a letter held by the Material service")
+    public void a_send_letter_notification_command_for_a_letter_held_by_the_material_service() {
+        aLetterCommand("fixtures/commands/send-letter.json", false);
+    }
+
+    @Given("a first-class send-letter-notification command for a letter held by the Material service")
+    public void a_first_class_send_letter_notification_command_for_a_letter_held_by_the_material_service() {
+        aLetterCommand("fixtures/commands/send-first-class-letter.json", true);
+    }
+
+    @Given("a send-letter-notification command for a letter whose Material document stays unavailable")
+    public void a_send_letter_notification_command_for_a_letter_whose_material_document_stays_unavailable() {
+        aLetterCommand("fixtures/commands/send-letter.json", false);
+        material.materialWillAnswer(context.getMaterialId(), HTTP_INTERNAL_SERVER_ERROR);
+    }
+
+    @Given("a send-letter-notification command for a letter whose Material document is briefly unavailable")
+    public void a_send_letter_notification_command_for_a_letter_whose_material_document_is_briefly_unavailable() {
+        aLetterCommand("fixtures/commands/send-letter.json", false);
+        material.documentWillBeUnavailableOnceThenServed(
+                context.getMaterialId(), LETTER_FILENAME, context.getAttachmentBytes());
+    }
+
     @When("the gateway processes the command")
     public void the_gateway_processes_the_command() {
-        anAsbTestClient().sendToCommandQueue(context.getCommandJson(), context.getReplyQueue());
+        anAsbTestClient(context.getCommandQueue()).sendToCommandQueue(context.getCommandJson(), context.getReplyQueue());
+    }
+
+    private void aLetterCommand(final String commandFixture, final boolean firstClass) {
+        final String notificationId = randomUUID().toString();
+        final String externalReference = randomUUID().toString();
+        final String materialId = randomUUID().toString();
+        final byte[] document = loadBytes("fixtures/attachments/material-document.pdf");
+
+        material.documentWillBeServed(materialId, LETTER_FILENAME, document);
+        govUkNotify
+                .sendLetterWillReturnSuccess(externalReference)
+                .letterStatusWillBe(externalReference, "received");
+
+        context.setCommandQueue(LETTER_COMMAND_QUEUE);
+        context.setNotificationId(notificationId);
+        context.setExternalReference(externalReference);
+        context.setMaterialId(materialId);
+        context.setAttachmentBytes(document);
+        context.setAttachmentFilename(LETTER_FILENAME);
+        context.setFirstClass(firstClass);
+        context.setMaterialUrl(material.materialClientLinkFor(materialId));
+        context.setCommandJson(load(commandFixture, of(
+                "notificationId", notificationId,
+                "letterUrl", context.getMaterialUrl())));
     }
 
     private void aMaterialDocumentIsAvailable() {

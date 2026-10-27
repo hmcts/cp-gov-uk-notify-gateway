@@ -4,8 +4,9 @@ import static uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo.executionInfo;
 import static uk.gov.hmcts.cp.taskmanager.domain.ExecutionStatus.COMPLETED;
 import static uk.gov.hmcts.cp.taskmanager.domain.ExecutionStatus.INPROGRESS;
 
-import jakarta.json.Json;
+import jakarta.json.JsonBuilderFactory;
 import jakarta.json.JsonObject;
+import jakarta.json.spi.JsonProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -38,6 +39,9 @@ public class TransientFailurePolicy {
 
     public static final String KEY_FINAL_ATTEMPT = "finalAttempt";
 
+    // Created once: Json.createObjectBuilder() looks up a new JSON provider on every call.
+    private static final JsonBuilderFactory JSON_BUILDER_FACTORY = JsonProvider.provider().createBuilderFactory(null);
+
     private final NotificationStatusService statusService;
     private final Clock clock;
     private final List<Long> retryDurationsSecs;
@@ -67,6 +71,19 @@ public class TransientFailurePolicy {
             final Integer statusCode,
             final String exhaustedReason,
             final ExecutionInfo executionInfo) {
+        return retryOrFail(notificationId, statusCode, exhaustedReason, executionInfo, retryDurationsSecs);
+    }
+
+    /**
+     * {@link #retryOrFail(UUID, Integer, String, ExecutionInfo)} for a task with its own retry durations (the
+     * letter tasks): the final attempt is scheduled after the last of {@code taskRetryDurationsSecs}.
+     */
+    public ExecutionInfo retryOrFail(
+            final UUID notificationId,
+            final Integer statusCode,
+            final String exhaustedReason,
+            final ExecutionInfo executionInfo,
+            final List<Long> taskRetryDurationsSecs) {
         final ExecutionInfo result;
         if (retriesExhausted(executionInfo)) {
             LOG.warn("Notification {} did not resolve (statusCode {}) after exhausting retries — marking FAILED",
@@ -75,7 +92,7 @@ public class TransientFailurePolicy {
         } else if (isLastRetry(executionInfo)) {
             LOG.info("Transient failure for notification {} (statusCode {}) — scheduling the final attempt",
                     notificationId, statusCode);
-            result = finalAttempt(executionInfo);
+            result = finalAttempt(executionInfo, taskRetryDurationsSecs.getLast());
         } else {
             LOG.info("Transient failure for notification {} (statusCode {}) — will retry", notificationId, statusCode);
             result = retry(executionInfo);
@@ -110,15 +127,15 @@ public class TransientFailurePolicy {
     // that would see retries exhausted never happens, so the notification stays QUEUED for good. Instead the
     // last retry reschedules the same task (INPROGRESS, no retry), which keeps its remaining count, and flags
     // it as the final attempt so a failure there marks it FAILED.
-    private ExecutionInfo finalAttempt(final ExecutionInfo executionInfo) {
-        final JsonObject jobData = Json.createObjectBuilder(executionInfo.getJobData())
+    private ExecutionInfo finalAttempt(final ExecutionInfo executionInfo, final long delaySecs) {
+        final JsonObject jobData = JSON_BUILDER_FACTORY.createObjectBuilder(executionInfo.getJobData())
                 .add(KEY_FINAL_ATTEMPT, true)
                 .build();
         return executionInfo().from(executionInfo)
                 .withJobData(jobData)
                 .withExecutionStatus(INPROGRESS)
                 .withShouldRetry(false)
-                .withAssignedTaskStartTime(clock.zonedDateTime().plusSeconds(retryDurationsSecs.getLast()))
+                .withAssignedTaskStartTime(clock.zonedDateTime().plusSeconds(delaySecs))
                 .build();
     }
 

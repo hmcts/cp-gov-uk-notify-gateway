@@ -1,0 +1,6 @@
+{
+  "notificationId": "${notificationId}",
+  "letterUrl": "${letterUrl}",
+  "postage": "first",
+  "clientContext": "correspondence"
+}

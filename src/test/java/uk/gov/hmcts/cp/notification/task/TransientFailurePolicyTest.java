@@ -90,6 +90,19 @@ class TransientFailurePolicyTest {
     }
 
     @Test
+    void retryOrFail_should_schedule_the_final_attempt_after_the_last_of_the_tasks_own_durations_when_given() {
+        final UUID id = UUID.randomUUID();
+
+        final ExecutionInfo result = policy.retryOrFail(
+                id, 503, "did not recover", jobWithRetriesRemaining(1), List.of(60L, 43_200L));
+
+        verifyNoInteractions(statusService);
+        assertThat(result.isShouldRetry()).isFalse();
+        assertThat(result.getAssignedTaskStartTime()).isEqualTo(ZonedDateTime.ofInstant(NOW, ZoneOffset.UTC).plusSeconds(43_200));
+        assertThat(result.getJobData().getBoolean(TransientFailurePolicy.KEY_FINAL_ATTEMPT)).isTrue();
+    }
+
+    @Test
     void retryOrFail_should_mark_failed_and_complete_when_the_final_attempt_fails() {
         final UUID id = UUID.randomUUID();
 

@@ -10,11 +10,13 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import uk.gov.service.notify.LetterResponse;
 import uk.gov.service.notify.Notification;
 import uk.gov.service.notify.NotificationClient;
 import uk.gov.service.notify.NotificationClientException;
 import uk.gov.service.notify.SendEmailResponse;
 
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
@@ -25,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailRequestFactory.aSendEmailRequest;
@@ -40,6 +43,9 @@ class GovNotifyClientTest {
 
     @Captor
     private ArgumentCaptor<Map<String, Object>> personalisationCaptor;
+
+    @Captor
+    private ArgumentCaptor<InputStream> documentCaptor;
 
     @Nested
     class Sending {
@@ -145,6 +151,59 @@ class GovNotifyClientTest {
             assertThatThrownBy(() -> govNotifyClient.send(aSendEmailRequest().attachment(null).build()))
                     .isInstanceOf(GovNotifyException.class)
                     .hasMessage("bad request")
+                    .extracting(e -> ((GovNotifyException) e).getHttpStatus())
+                    .isEqualTo(400);
+        }
+    }
+
+    @Nested
+    class SendingLetters {
+        private static final byte[] PDF = "%PDF-1.4 letter".getBytes(StandardCharsets.UTF_8);
+
+        @Test
+        void send_precompiled_letter_sends_a_first_class_letter_with_first_postage_and_returns_the_external_id()
+                throws Exception {
+            final UUID notificationId = UUID.randomUUID();
+            final UUID externalId = UUID.randomUUID();
+            final LetterResponse response = mock(LetterResponse.class);
+            when(response.getNotificationId()).thenReturn(externalId);
+            when(notificationClient.sendPrecompiledLetterWithInputStream(eq(notificationId.toString()), any(), eq("first")))
+                    .thenReturn(response);
+
+            final String reference = govNotifyClient.sendPrecompiledLetter(notificationId, PDF, true);
+
+            assertThat(reference).isEqualTo(externalId.toString());
+            verify(notificationClient).sendPrecompiledLetterWithInputStream(
+                    eq(notificationId.toString()), documentCaptor.capture(), eq("first"));
+            assertThat(documentCaptor.getValue().readAllBytes()).isEqualTo(PDF);
+        }
+
+        @Test
+        void send_precompiled_letter_sends_any_other_letter_without_postage() throws Exception {
+            final UUID notificationId = UUID.randomUUID();
+            final LetterResponse response = mock(LetterResponse.class);
+            when(response.getNotificationId()).thenReturn(UUID.randomUUID());
+            when(notificationClient.sendPrecompiledLetterWithInputStream(eq(notificationId.toString()), any()))
+                    .thenReturn(response);
+
+            govNotifyClient.sendPrecompiledLetter(notificationId, PDF, false);
+
+            verify(notificationClient).sendPrecompiledLetterWithInputStream(
+                    eq(notificationId.toString()), documentCaptor.capture());
+            assertThat(documentCaptor.getValue().readAllBytes()).isEqualTo(PDF);
+            verify(notificationClient, never()).sendPrecompiledLetterWithInputStream(any(), any(), any());
+        }
+
+        @Test
+        void send_precompiled_letter_wraps_a_notification_client_exception_as_a_gov_notify_exception() throws Exception {
+            final NotificationClientException clientException = mock(NotificationClientException.class);
+            when(clientException.getHttpResult()).thenReturn(400);
+            when(clientException.getMessage()).thenReturn("precompiledPDF must be a valid PDF file");
+            when(notificationClient.sendPrecompiledLetterWithInputStream(any(), any())).thenThrow(clientException);
+
+            assertThatThrownBy(() -> govNotifyClient.sendPrecompiledLetter(UUID.randomUUID(), PDF, false))
+                    .isInstanceOf(GovNotifyException.class)
+                    .hasMessage("precompiledPDF must be a valid PDF file")
                     .extracting(e -> ((GovNotifyException) e).getHttpStatus())
                     .isEqualTo(400);
         }

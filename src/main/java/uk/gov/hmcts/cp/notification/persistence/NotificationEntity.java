@@ -49,6 +49,9 @@ public class NotificationEntity {
     @Column(name = "material_url")
     private String materialUrl;
 
+    @Column(name = "letter_url")
+    private String letterUrl;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 
