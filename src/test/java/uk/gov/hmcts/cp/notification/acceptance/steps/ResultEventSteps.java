@@ -21,7 +21,8 @@ public class ResultEventSteps {
                 .withField("notificationId", context.getNotificationId())
                 .withField("emailSubject", "Your NCES extract")
                 .withField("emailBody", "Please find your report attached.")
-                .withField("replyToAddress", "noreply@justice.gov.uk");
+                .withField("replyToAddress", "noreply@justice.gov.uk")
+                .withFieldPresent("completedAt");
     }
 
     @Then("a notification-sent result event for the Office 365 email is published to the originator's reply queue")
@@ -32,7 +33,8 @@ public class ResultEventSteps {
                 .withField("notificationId", context.getNotificationId())
                 .withField("emailSubject", "Your document is ready")
                 .withField("emailBody", "Please find the document attached.")
-                .withField("replyToAddress", "NOREPLY@noreply.com");
+                .withField("replyToAddress", "NOREPLY@noreply.com")
+                .withFieldPresent("completedAt");
     }
 
     @Then("a notification-sent result event for the letter is published to the originator's reply queue")

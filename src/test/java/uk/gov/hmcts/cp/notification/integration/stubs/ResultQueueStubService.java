@@ -5,7 +5,6 @@ import com.azure.messaging.servicebus.ServiceBusReceivedMessage;
 import java.time.Duration;
 import java.util.UUID;
 
-import uk.gov.hmcts.cp.notification.integration.Fixtures;
 import uk.gov.hmcts.cp.notification.integration.stubs.support.ContractSchema;
 
 import static net.javacrumbs.jsonunit.assertj.JsonAssertions.assertThatJson;

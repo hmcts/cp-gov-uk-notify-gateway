@@ -105,6 +105,8 @@ class NotificationStatusServiceTest {
     @Test
     void publishes_a_sent_result_event_to_the_persisted_reply_queue() {
         final UUID id = UUID.randomUUID();
+        final OffsetDateTime sentAt = OffsetDateTime.of(2026, 10, 27, 14, 5, 0, 0, ZoneOffset.UTC);
+        when(clock.offsetDateTime()).thenReturn(sentAt);
         when(notificationRepository.findById(id)).thenReturn(Optional.of(aNotificationEntity()
                 .notificationId(id)
                 .resultQueue("originator-reply-queue")
@@ -120,6 +122,8 @@ class NotificationStatusServiceTest {
         assertThat(event.getValue().getEmailSubject()).isEqualTo("Your NCES extract");
         assertThat(event.getValue().getEmailBody()).isEqualTo("Please find your report attached.");
         assertThat(event.getValue().getReplyToAddress()).isEqualTo("noreply@justice.gov.uk");
+        assertThat(event.getValue().getSentTime()).isEqualTo(sentAt);
+        assertThat(event.getValue().getCompletedAt()).isEqualTo(sentAt);
     }
 
     @Test

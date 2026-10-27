@@ -59,8 +59,8 @@ public class NotificationStatusService {
     }
 
     /**
-     * Marks a letter SENT once Gov.Notify has received it. Legacy parity: the sent event carries
-     * {@code completedAt} (the time it was recorded) and none of the email fields.
+     * Marks a letter SENT once Gov.Notify has received it. Legacy parity: the sent event carries none of the
+     * email fields.
      */
     @Transactional
     public void markLetterSent(final UUID notificationId) {
@@ -69,9 +69,7 @@ public class NotificationStatusService {
         notification.setUpdatedAt(now());
         notificationRepository.save(notification);
         LOG.info("Letter notification {} marked SENT", notificationId);
-        resultEventPublisher.publish(notification.getResultQueue(), sentEvent(notification)
-                .completedAt(notification.getUpdatedAt())
-                .build());
+        resultEventPublisher.publish(notification.getResultQueue(), sentEvent(notification).build());
     }
 
     /**
@@ -106,6 +104,7 @@ public class NotificationStatusService {
         return NotificationSentEvent.builder()
                 .notificationId(notification.getNotificationId())
                 .sentTime(notification.getUpdatedAt())
+                .completedAt(notification.getUpdatedAt())
                 .clientContext(notification.getClientContext());
     }
 
