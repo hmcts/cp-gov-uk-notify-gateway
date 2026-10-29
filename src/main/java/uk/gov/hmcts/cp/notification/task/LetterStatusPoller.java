@@ -82,7 +82,8 @@ public class LetterStatusPoller {
             final List<Long> retryDurationsSecs) {
         return failurePolicy.retryOrFail(letter.notificationId(), null,
                 "Gov.Notify did not reach a terminal status within the retry window (last status '"
-                        + lastStatus.getStatus() + "')", executionInfo, retryDurationsSecs);
+                        + lastStatus.getStatus() + "')", executionInfo, retryDurationsSecs,
+                RetryCause.STILL_IN_PROGRESS);
     }
 
     private ExecutionInfo evaluate(
@@ -128,7 +129,7 @@ public class LetterStatusPoller {
         if (isTemporary(e.getHttpStatus(), e.getMessage())) {
             result = failurePolicy.retryOrFail(letter.notificationId(), e.getHttpStatus(),
                     "Gov.Notify status polling did not recover within the retry window", executionInfo,
-                    retryDurationsSecs);
+                    retryDurationsSecs, RetryCause.STATUS_CHECK);
         } else {
             result = failurePolicy.fail(letter.notificationId(), e.getHttpStatus(), e.getMessage(), executionInfo);
         }

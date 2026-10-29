@@ -44,7 +44,8 @@ class TransientFailurePolicyTest {
     void retryOrFail_should_retry_without_touching_status_when_attempts_remain() {
         final UUID id = UUID.randomUUID();
 
-        final ExecutionInfo result = policy.retryOrFail(id, 500, "did not recover", jobWithRetriesRemaining(2));
+        final ExecutionInfo result = policy.retryOrFail(
+                id, 500, "did not recover", jobWithRetriesRemaining(2), RetryCause.GOV_NOTIFY_SEND);
 
         verifyNoInteractions(statusService);
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
@@ -55,7 +56,8 @@ class TransientFailurePolicyTest {
     void retryOrFail_should_retry_when_retry_attempts_are_unset() {
         final UUID id = UUID.randomUUID();
 
-        final ExecutionInfo result = policy.retryOrFail(id, 500, "did not recover", jobWithRetriesRemaining(null));
+        final ExecutionInfo result = policy.retryOrFail(
+                id, 500, "did not recover", jobWithRetriesRemaining(null), RetryCause.GOV_NOTIFY_SEND);
 
         verifyNoInteractions(statusService);
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
@@ -66,7 +68,8 @@ class TransientFailurePolicyTest {
     void retryOrFail_should_mark_failed_and_complete_when_retries_are_exhausted() {
         final UUID id = UUID.randomUUID();
 
-        final ExecutionInfo result = policy.retryOrFail(id, 503, "did not recover", jobWithRetriesRemaining(0));
+        final ExecutionInfo result = policy.retryOrFail(
+                id, 503, "did not recover", jobWithRetriesRemaining(0), RetryCause.GOV_NOTIFY_SEND);
 
         verify(statusService).markFailed(id, 503, "did not recover");
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
@@ -77,7 +80,8 @@ class TransientFailurePolicyTest {
         final UUID id = UUID.randomUUID();
         final ExecutionInfo lastRetry = jobWithRetriesRemaining(1);
 
-        final ExecutionInfo result = policy.retryOrFail(id, 503, "did not recover", lastRetry);
+        final ExecutionInfo result = policy.retryOrFail(
+                id, 503, "did not recover", lastRetry, RetryCause.GOV_NOTIFY_SEND);
 
         verifyNoInteractions(statusService);
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
@@ -94,7 +98,8 @@ class TransientFailurePolicyTest {
         final UUID id = UUID.randomUUID();
 
         final ExecutionInfo result = policy.retryOrFail(
-                id, 503, "did not recover", jobWithRetriesRemaining(1), List.of(60L, 43_200L));
+                id, 503, "did not recover", jobWithRetriesRemaining(1), List.of(60L, 43_200L),
+                RetryCause.GOV_NOTIFY_SEND);
 
         verifyNoInteractions(statusService);
         assertThat(result.isShouldRetry()).isFalse();
@@ -106,9 +111,48 @@ class TransientFailurePolicyTest {
     void retryOrFail_should_mark_failed_and_complete_when_the_final_attempt_fails() {
         final UUID id = UUID.randomUUID();
 
-        final ExecutionInfo result = policy.retryOrFail(id, 503, "did not recover", finalAttemptJob());
+        final ExecutionInfo result = policy.retryOrFail(
+                id, 503, "did not recover", finalAttemptJob(), RetryCause.GOV_NOTIFY_SEND);
 
         verify(statusService).markFailed(id, 503, "did not recover");
+        assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
+    }
+
+    @Test
+    void retryOrFail_should_poll_again_without_touching_status_when_still_in_progress_and_attempts_remain() {
+        final UUID id = UUID.randomUUID();
+
+        final ExecutionInfo result = policy.retryOrFail(
+                id, null, "no terminal status", jobWithRetriesRemaining(2), RetryCause.STILL_IN_PROGRESS);
+
+        verifyNoInteractions(statusService);
+        assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
+        assertThat(result.isShouldRetry()).isTrue();
+    }
+
+    @Test
+    void retryOrFail_should_schedule_the_final_poll_after_the_last_duration_when_still_in_progress_and_one_attempt_remains() {
+        final UUID id = UUID.randomUUID();
+
+        final ExecutionInfo result = policy.retryOrFail(
+                id, null, "no terminal status", jobWithRetriesRemaining(1), List.of(60L, 43_200L),
+                RetryCause.STILL_IN_PROGRESS);
+
+        verifyNoInteractions(statusService);
+        assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
+        assertThat(result.isShouldRetry()).isFalse();
+        assertThat(result.getAssignedTaskStartTime()).isEqualTo(ZonedDateTime.ofInstant(NOW, ZoneOffset.UTC).plusSeconds(43_200));
+        assertThat(result.getJobData().getBoolean(TransientFailurePolicy.KEY_FINAL_ATTEMPT)).isTrue();
+    }
+
+    @Test
+    void retryOrFail_should_mark_failed_without_a_status_code_when_still_in_progress_after_polls_are_exhausted() {
+        final UUID id = UUID.randomUUID();
+
+        final ExecutionInfo result = policy.retryOrFail(
+                id, null, "no terminal status", finalAttemptJob(), RetryCause.STILL_IN_PROGRESS);
+
+        verify(statusService).markFailed(id, null, "no terminal status");
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
     }
 

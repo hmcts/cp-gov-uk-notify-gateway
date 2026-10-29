@@ -69,7 +69,7 @@ public class CheckEmailStatusTask implements ExecutableTask {
         } else if (status.isInProgress()) {
             result = failurePolicy.retryOrFail(notificationId, null,
                     "Gov.Notify did not reach a terminal status within the retry window (last status '"
-                            + status.getStatus() + "')", executionInfo);
+                            + status.getStatus() + "')", executionInfo, RetryCause.STILL_IN_PROGRESS);
         } else {
             result = failurePolicy.fail(notificationId, null,
                     "Gov.Notify responded with status '" + status.getStatus() + "'", executionInfo);
@@ -82,7 +82,8 @@ public class CheckEmailStatusTask implements ExecutableTask {
         final ExecutionInfo result;
         if (isTemporary(e.getHttpStatus(), e.getMessage())) {
             result = failurePolicy.retryOrFail(notificationId, e.getHttpStatus(),
-                    "Gov.Notify status polling did not recover within the retry window", executionInfo);
+                    "Gov.Notify status polling did not recover within the retry window", executionInfo,
+                    RetryCause.STATUS_CHECK);
         } else {
             result = failurePolicy.fail(notificationId, e.getHttpStatus(), e.getMessage(), executionInfo);
         }
