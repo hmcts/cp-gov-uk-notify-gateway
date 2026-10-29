@@ -75,7 +75,8 @@ public class SendEmailTask implements ExecutableTask {
             result = failurePolicy.fail(command.notificationId(), e.getStatusCode(), e.getMessage(), executionInfo);
         } catch (final BlobStorageException e) {
             result = failurePolicy.retryOrFail(command.notificationId(), e.getStatusCode(),
-                    "Attachment download did not recover within the retry window", executionInfo);
+                    "Attachment download did not recover within the retry window", executionInfo,
+                    RetryCause.ATTACHMENT_DOWNLOAD);
         } catch (final MaterialAttachmentException e) {
             result = materialAttachmentFailed(command, e, executionInfo);
         }
@@ -87,7 +88,8 @@ public class SendEmailTask implements ExecutableTask {
         final ExecutionInfo result;
         if (failure.isRetryable()) {
             result = failurePolicy.retryOrFail(command.notificationId(), failure.getStatusCode(),
-                    "Material attachment download did not recover within the retry window", executionInfo);
+                    "Material attachment download did not recover within the retry window", executionInfo,
+                    RetryCause.MATERIAL_DOWNLOAD);
         } else {
             LOG.warn("Permanent Material attachment failure for notification {} ({}) — marking FAILED, no retry",
                     command.notificationId(), failure.getMessage());
@@ -124,7 +126,8 @@ public class SendEmailTask implements ExecutableTask {
         } catch (final GovNotifyException e) {
             if (GovNotifyFailureClassifier.isTemporary(e.getHttpStatus(), e.getMessage())) {
                 result = failurePolicy.retryOrFail(command.notificationId(), e.getHttpStatus(),
-                        "Gov.Notify send did not recover within the retry window", executionInfo);
+                        "Gov.Notify send did not recover within the retry window", executionInfo,
+                        RetryCause.GOV_NOTIFY_SEND);
             } else {
                 LOG.warn("Permanent send failure for notification {} (http {}) — marking FAILED",
                         command.notificationId(), e.getHttpStatus());
@@ -144,7 +147,8 @@ public class SendEmailTask implements ExecutableTask {
                     executionInfo);
         } else {
             result = failurePolicy.retryOrFail(command.notificationId(), failure.getHttpStatus(),
-                    "Office 365 send did not recover within the retry window", executionInfo);
+                    "Office 365 send did not recover within the retry window", executionInfo,
+                    RetryCause.OFFICE365_SEND);
         }
         return result;
     }

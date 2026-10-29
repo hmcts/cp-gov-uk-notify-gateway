@@ -75,7 +75,7 @@ public class SendLetterTask implements ExecutableTask {
             if (GovNotifyFailureClassifier.isTemporary(e.getHttpStatus(), e.getMessage())) {
                 result = failurePolicy.retryOrFail(letter.notificationId(), e.getHttpStatus(),
                         "Gov.Notify letter send did not recover within the retry window", executionInfo,
-                        retryDurationsSecs);
+                        retryDurationsSecs, RetryCause.GOV_NOTIFY_SEND);
             } else {
                 LOG.warn("Permanent letter send failure for notification {} (http {}) — marking FAILED",
                         letter.notificationId(), e.getHttpStatus());
@@ -91,7 +91,7 @@ public class SendLetterTask implements ExecutableTask {
         if (failure.isRetryable()) {
             result = failurePolicy.retryOrFail(letter.notificationId(), failure.getStatusCode(),
                     "Material letter download did not recover within the retry window", executionInfo,
-                    retryDurationsSecs);
+                    retryDurationsSecs, RetryCause.MATERIAL_DOWNLOAD);
         } else {
             LOG.warn("Permanent Material letter download failure for notification {} ({}) — marking FAILED, no retry",
                     letter.notificationId(), failure.getMessage());

@@ -63,6 +63,8 @@ public class TransientFailurePolicy {
      * @param statusCode      the HTTP/status code of the failure, or {@code null} if none applies
      * @param exhaustedReason the failure reason recorded once retries are exhausted
      * @param executionInfo   the current execution
+     * @param cause           the call that failed, or {@link RetryCause#STILL_IN_PROGRESS} when Gov.Notify still
+     *                        reports the notification in progress (not a failure: it is polled again)
      * @return {@code INPROGRESS} + retry while more than one attempt remains, {@code INPROGRESS} rescheduled
      *         as the final attempt when one remains, otherwise {@code COMPLETED}
      */
@@ -70,31 +72,49 @@ public class TransientFailurePolicy {
             final UUID notificationId,
             final Integer statusCode,
             final String exhaustedReason,
-            final ExecutionInfo executionInfo) {
-        return retryOrFail(notificationId, statusCode, exhaustedReason, executionInfo, retryDurationsSecs);
+            final ExecutionInfo executionInfo,
+            final RetryCause cause) {
+        return retryOrFail(notificationId, statusCode, exhaustedReason, executionInfo, retryDurationsSecs, cause);
     }
 
     /**
-     * {@link #retryOrFail(UUID, Integer, String, ExecutionInfo)} for a task with its own retry durations (the
-     * letter tasks): the final attempt is scheduled after the last of {@code taskRetryDurationsSecs}.
+     * {@link #retryOrFail(UUID, Integer, String, ExecutionInfo, RetryCause)} for a task with its own retry durations
+     * (the letter tasks): the final attempt is scheduled after the last of {@code taskRetryDurationsSecs}.
      */
     public ExecutionInfo retryOrFail(
             final UUID notificationId,
             final Integer statusCode,
             final String exhaustedReason,
             final ExecutionInfo executionInfo,
-            final List<Long> taskRetryDurationsSecs) {
+            final List<Long> taskRetryDurationsSecs,
+            final RetryCause cause) {
+        final boolean polling = cause == RetryCause.STILL_IN_PROGRESS;
         final ExecutionInfo result;
         if (retriesExhausted(executionInfo)) {
-            LOG.warn("Notification {} did not resolve (statusCode {}) after exhausting retries — marking FAILED",
-                    notificationId, statusCode);
+            if (polling) {
+                LOG.warn("Notification {} still in progress at Gov.Notify after exhausting status polls"
+                        + " — marking FAILED", notificationId);
+            } else {
+                LOG.warn("Transient failure {} for notificationId {} (statusCode {}) did not recover after"
+                        + " exhausting retries — marking FAILED", cause.getDescription(), notificationId, statusCode);
+            }
             result = fail(notificationId, statusCode, exhaustedReason, executionInfo);
         } else if (isLastRetry(executionInfo)) {
-            LOG.info("Transient failure for notification {} (statusCode {}) — scheduling the final attempt",
-                    notificationId, statusCode);
+            if (polling) {
+                LOG.info("Notification {} still in progress at Gov.Notify — scheduling the final status poll",
+                        notificationId);
+            } else {
+                LOG.info("Transient failure {} for notificationId {} (statusCode {}) — scheduling the final attempt",
+                        cause.getDescription(), notificationId, statusCode);
+            }
             result = finalAttempt(executionInfo, taskRetryDurationsSecs.getLast());
         } else {
-            LOG.info("Transient failure for notification {} (statusCode {}) — will retry", notificationId, statusCode);
+            if (polling) {
+                LOG.info("Notification {} still in progress at Gov.Notify — polling again", notificationId);
+            } else {
+                LOG.info("Transient failure {} for notificationId {} (statusCode {}) — will retry",
+                        cause.getDescription(), notificationId, statusCode);
+            }
             result = retry(executionInfo);
         }
         return result;
