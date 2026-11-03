@@ -22,7 +22,7 @@ import java.util.Set;
  * {@link CheckAcceptedLetterStatusTask}, which differ only in what {@code accepted} means and how long they
  * keep polling. A letter is sent once Gov.Notify has {@code received} it (letters never reach
  * {@code delivered}). Gov.Notify failing the letter's validation sends it again, up to
- * {@link LetterJob#RESEND_ATTEMPTS} times, as legacy did. Other statuses follow the email rule (ADR-002 D3):
+ * {@link LetterJob#RESEND_ATTEMPTS} times, as legacy did. Other statuses follow the email rule (ADR-002 D2):
  * a status known to be in progress is polled again, anything else fails the letter at once.
  */
 @Component

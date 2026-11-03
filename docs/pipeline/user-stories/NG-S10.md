@@ -24,18 +24,18 @@ this story lands, only ≤2MB Gov.Notify sends work; confirmed by Stage 2 not to
 - [x] AC-040: Given an Office 365 failure, when the `send-email` task handles it, then `400` and `413` (and
   a request that cannot be built) fail the notification at once, and every other status, I/O failure or
   timeout (connect 30s, request 300s) is retried on `email-durations-secs` and then fails (legacy
-  `FailureSelector` parity; the timeouts are ADR-002 D13).
+  `FailureSelector` parity; the timeouts are ADR-002 D9).
 - [x] AC-041: Given a `200` whose body cannot be read, then the notification is still recorded SENT; given a
   failure while recording SENT, then recording is retried by its own `RECORD_SENT` task and, once retries run
   out, its job is left parked for manual replay — the email is never sent again.
 
 ## NFR links
 - NFR-001 (Behavioural parity): size threshold and Office 365 call unchanged from legacy; deviations are
-  ADR-002 D13 (send) and D14 (routing).
+  ADR-002 D9 (send) and D10 (routing).
 
 ## Out of scope for this story
 - **AC-027 (recipient-domain route, `cjsm.net`) — descoped.** Every environment sets the domain list to
-  blank, so legacy never takes this route; it is not implemented (ADR-002 D14).
+  blank, so legacy never takes this route; it is not implemented (ADR-002 D10).
 - Replacing the legacy function with Microsoft Graph `sendMail` and a managed identity (ADR-004 follow-up).
 - Any change to the Gov.UK Notify send/poll path (NG-S02) — routing only selects between the two, it
   does not alter either sender's internal behaviour.

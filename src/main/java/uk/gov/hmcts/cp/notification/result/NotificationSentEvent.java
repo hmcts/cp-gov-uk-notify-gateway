@@ -11,7 +11,7 @@ import java.util.UUID;
 @Builder
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public final class NotificationSentEvent implements ResultEvent {
-    public static final String EVENT_NAME = "public.notificationnotify.events.notification-sent";
+    public static final String EVENT_NAME = "notification-sent";
 
     private final UUID notificationId;
     private final OffsetDateTime sentTime;

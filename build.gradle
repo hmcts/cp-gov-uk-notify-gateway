@@ -37,7 +37,7 @@ dependencies {
   implementation 'org.springframework.boot:spring-boot-starter-web'
   // Bean Validation (jakarta) — validates the inbound SendEmailCommand and provides the Validator bean
   implementation 'org.springframework.boot:spring-boot-starter-validation'
-  // Security — deny-by-default filter chain; only the actuator probes/metrics are served over HTTP (ADR-002 D7)
+  // Security — deny-by-default filter chain; only the actuator probes/metrics are served over HTTP (ADR-002 D6)
   implementation 'org.springframework.boot:spring-boot-starter-security'
   testImplementation "org.springframework.boot:spring-boot-starter-webmvc-test"
   // @DataJpaTest slice (Boot 4 modular test starter) for the repository boundary test — no full context

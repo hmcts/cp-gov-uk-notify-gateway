@@ -71,7 +71,7 @@ cp:
     office365:
       endpoint: ${CP_NG_OFFICE365_ENDPOINT:}
       subscription-key: ${CP_NG_OFFICE365_SUBSCRIPTION_KEY:}
-      # Bounded, unlike legacy (ADR-002 D13): the Function's front end drops a call after about 230s, so the
+      # Bounded, unlike legacy (ADR-002 D9): the Function's front end drops a call after about 230s, so the
       # request timeout sits above that; a timeout is retried like any I/O failure.
       connect-timeout: ${CP_NG_OFFICE365_CONNECT_TIMEOUT:30s}
       request-timeout: ${CP_NG_OFFICE365_REQUEST_TIMEOUT:300s}

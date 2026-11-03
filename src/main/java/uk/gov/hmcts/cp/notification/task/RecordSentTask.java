@@ -21,7 +21,7 @@ import java.util.UUID;
  * retried without sending the email again — legacy hands the same step to a {@code mark-as-sent} command on
  * Artemis. It never marks FAILED: the email was sent. When the last retry fails the job is left in the
  * {@code jobs} table with no retries remaining, which cp-task-manager never picks up again, so it can be
- * inspected and replayed by hand (the equivalent of legacy's DLQ; ADR-002 D13).
+ * inspected and replayed by hand (the equivalent of legacy's DLQ; ADR-002 D9).
  */
 @Task(RecordSentTask.TASK_NAME)
 @Component

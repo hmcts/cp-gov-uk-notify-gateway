@@ -162,20 +162,13 @@ class MaterialAttachmentDownloaderIntegrationTest {
             assertFailure(null, false);
             material.documentWasNotDownloaded();
         }
-
-        @Test
-        void fails_permanently_when_storage_rejects_the_link_as_invalid() {
-            material.documentLinkWillAnswer(materialId, FILENAME, 400);
-
-            assertFailure(400, false);
-        }
     }
 
     @Nested
     class WhenTheDocumentCannotBeDownloadedYet {
 
         @ParameterizedTest
-        @ValueSource(ints = {403, 404, 500, 503})
+        @ValueSource(ints = {400, 403, 404, 500, 503})
         void fails_retryably_with_the_status_storage_returned(final int status) {
             material.documentLinkWillAnswer(materialId, FILENAME, status);
 

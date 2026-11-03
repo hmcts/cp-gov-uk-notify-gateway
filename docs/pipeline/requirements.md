@@ -82,7 +82,7 @@ routed; see the note under Milestone 6.
 | FR-005 | Gov.UK Notify path: on a successful send, schedule a `check-email-status` cp-task-manager task (storing the Gov.Notify external reference id); poll status and on `DELIVERED` call `markSent()`. | Must | • **svc**<br>• Gov.Notify sender + status-poll logic to port ← (legacy)<br>• retry/poll pattern ← `service-cp-crime-hearing-results-document-subscription` | PEG-3356 |
 | FR-006 | Run all async scheduling, retry/backoff, and status-polling through **cp-task-manager**, preserving the legacy retry-duration lists verbatim (email retry durations `60,300,1800,3600,7200,14400`, and the other lists for letters when in scope). The lists MUST be **externalised to configuration** (a property, default = the legacy values), overridable per environment without a redeploy — preserving the legacy `@GlobalValue` tunability (`notify.email.retry.threshold.durations`), not hard-coded constants. | Must | • **svc**<br>• async engine (library + example) ← `cp-task-manager`<br>• retry-duration lists ← (legacy) | PEG-3357 |
 | FR-007 | Implement the **full result-publish path**: build the terminal result event and send it to the per-originator queue named by the inbound message's ASB `ReplyTo` property. Because the terminal event is emitted by a **later task execution** than ingest, `ReplyTo` is **captured at ingest into the `notification.result_queue` column** (not threaded through `job_data`, not re-read from the message) and **read back at the terminal hop** — where the row is already loaded for the state-transition guard. **Publish only when `result_queue` is present**; when absent (the mi-reportdata MVP case), complete the send silently with no result published. | Must | • **svc**<br>• ASB sender pattern ← `service-cp-crime-hearing-results-document-subscription` | PEG-3358 |
-| FR-008 | **Preserve the result events' names and payloads** as the contract, now queue-routed to `ReplyTo` rather than broadcast to a topic (validated by golden-master parity against the legacy service). **In MVP scope only `notification-sent` and `notification-failed` apply** (`public.notificationnotify.events.notification-sent` / `…notification-failed`); the other two legacy events (`…email-notification-bounced`, `…poca-email-notification-received`) belong to the **out-of-scope** bounce/POCA flows and are preserved when those land. | Must | • **svc**<br>• result-event names/payloads (golden-master) ← (legacy) | PEG-3359 |
+| FR-008 | **Preserve the result events' payloads** as the contract, now queue-routed to `ReplyTo` rather than broadcast to a topic (validated by golden-master parity against the legacy service). The event names drop the legacy `public.notificationnotify.events.` prefix (ADR-002 D13). **In MVP scope only `notification-sent` and `notification-failed` apply**; the other two legacy events (`…email-notification-bounced`, `…poca-email-notification-received`) belong to the **out-of-scope** bounce/POCA flows and are preserved when those land. | Must | • **svc**<br>• result-event names/payloads (golden-master) ← (legacy) | PEG-3359 |
 | FR-009 | Provide a **read (query) REST API** that returns **all columns** of the `notification` table (single-notification lookup and search). Reads only — the "no REST" rule applies solely to the command path. (Authentication ships in the MVP — see FR-024, pulled forward per Q3; the read API is never exposed unauthenticated.) | Must | • **svc**<br>• REST / JPA pattern ← `cp-court-list-publishing-service`<br>• query reference ← (legacy) | PEG-3360 |
 
 ### Milestone 2 — Integration tests (run locally)
@@ -189,7 +189,7 @@ routed; see the note under Milestone 6.
 - AC-015: Given an inbound message with no `ReplyTo` (the mi-reportdata MVP), when the notification reaches a terminal state, then no result event is published and the send completes silently.
 
 ### FR-008 — Result-event contract parity
-- AC-016: Given a `markSent()` / `markFailed()` outcome, when the result event is built, then its name and payload match the legacy golden-master payload exactly (only routing changes from topic to `ReplyTo` queue).
+- AC-016: Given a `markSent()` / `markFailed()` outcome, when the result event is built, then its payload matches the legacy golden-master payload exactly; its name is `notification-sent` / `notification-failed` (legacy prefix dropped) and it is routed to the `ReplyTo` queue instead of the topic (ADR-002 D13).
 
 ### FR-009 — Query API returns all columns
 - AC-017: Given a persisted notification, when the read API is queried by id, then the response contains all columns of the `notification` table.
@@ -263,7 +263,7 @@ Required set (`notificationId`, `templateId`, `sendToAddress`) and `additionalPr
 
 > **`materialUrl` is supported** (optional string, as in legacy): the gateway fetches the document through
 > the Material service and attaches it. A non-blank `materialUrl` wins over `fileUri`; a blank one counts as
-> absent. See ADR-002 D4 and D8–D11.
+> absent. See ADR-002 D3, D7 and D8, and its Material system user note.
 
 > **Transport property — not a body field:** the ASB `ReplyTo` message property (result-event routing,
 > FR-007) is **not** part of the command body. It is captured at ingest into the `notification.result_queue`
@@ -331,7 +331,7 @@ Required set (`notificationId`, `templateId`, `sendToAddress`) and `additionalPr
 - **Producer-side changes in `cpp-context-mi-reportdata`** (feature toggle `useServiceBus`, CSV upload
   to blob, ASB publish, its own RBAC) — separate repo; referenced only as the triggering dependency.
 - ~~**Letters** (`send-letter` + accepted/received long-poll + invalid-resend)~~ — now implemented: see
-  ADR-002 D15/D16. The ex-aggregate state (postage, resends remaining) travels in the letter tasks' job
+  ADR-002 D11/D12. The ex-aggregate state (postage, resends remaining) travels in the letter tasks' job
   data rather than in `resend_attempts_remaining` / `postage` columns; only `letter_url` was added (V1002).
 - **Bounced-email detection and POCA inbound mailbox flows** (IMAP pollers, `bounced_email_notified`,
   `poca_email` table), and their `@Scheduled` triggers.

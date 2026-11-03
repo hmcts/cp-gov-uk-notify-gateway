@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:hmcts:cpp:public.notificationnotify.events.notification-sent",
-  "title": "public.notificationnotify.events.notification-sent",
+  "$id": "urn:hmcts:cp:cp-gov-uk-notify-gateway.notification-sent",
+  "title": "notification-sent",
   "description": "Golden-master result-event contract ported verbatim from cpp-context-notification-notify (see docs/pipeline/legacy-result-event-contract.md). Additive-only evolution.",
   "type": "object",
   "additionalProperties": false,

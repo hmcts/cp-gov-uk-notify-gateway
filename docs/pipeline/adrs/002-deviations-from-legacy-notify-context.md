@@ -17,46 +17,304 @@ The two framework swaps that drive most deviations:
   framework, RAML-defined command & query APIs) → Spring Boot + Azure Service Bus.
 - **Async job scheduling:** legacy jobstore (`uk.gov.moj.cpp.jobstore`) → new
   `cp-task-manager` (`uk.gov.hmcts.cp.taskmanager`). The two have **different retry SPIs**
-  (see D2).
+  (see [Retry exhaustion implementation](#retry-exhaustion-implementation)).
 
 ## Deviation register
 
-| # | Area | Legacy behaviour | New behaviour | Deliberate? | Justification / risk | References |
-|---|------|------------------|---------------|-------------|----------------------|------------|
-| D1 | **Send-notification ingress contract** | Synchronous REST **command API** (`notificationnotify-command-api.raml`, `POST /notifications/{notificationId}`) fronting an async JMS command handler | **Asynchronous Azure Service Bus** message consumer (`SendEmailConsumer`); no REST command endpoint. **No inbound business HTTP surface at all**: the gateway's query API was removed (see D7); HTTP is deny-by-default and serves only the actuator health, info and Prometheus endpoints | Yes | Fits the MbD/Service-Bus platform; decouples callers from synchronous availability. Risk: callers that expected a synchronous command ack must adopt fire-and-forget and take the outcome from the `ReplyTo` result events | new: `messaging/SendEmailConsumer.java`, `messaging/ServiceBusConfig.java`, `web/SecurityConfig.java` (deny-by-default); legacy: `notificationnotify-command/notificationnotify-command-api/src/raml/notificationnotify-command-api.raml` |
-| D2 | **Retry exhaustion (all transient retries)** | `RetryHandler` pre-applies `permanentFailureHandler` as the jobstore **exhaust task**, so when configured retries run out the notification **terminalises to permanent failure** | New `cp-task-manager` SPI has **no exhaust-task hook**; `CheckEmailStatusTask.retry()` returns `INPROGRESS + shouldRetry` only. On exhaustion `TaskExecutor` re-persists the same task with `retryAttemptsRemaining=0` and **never terminalises** → notification stuck `QUEUED` and the poll **hot-loops** GOV.UK Notify | **No — regression** | Behaviour silently lost in the jobstore→task-manager migration. **Fix:** `TransientFailurePolicy` marks the notification FAILED on exhaustion. Because `cp-task-manager` never picks up a job with `retry_attempts_remaining = 0` (`JobsRepository` pickup query), the last retry reschedules the same task as `INPROGRESS` with no retry, after the last retry duration and with `finalAttempt` in the job data; that keeps the remaining count, so the job runs once more, and a failure there marks it FAILED. Every configured duration is used (legacy parity: first attempt plus one retry per duration). Without it the notification stays `QUEUED` after retries run out | legacy: `.../task/handlers/RetryHandler.java`; new: `task/TransientFailurePolicy.java`, `task/CheckEmailStatusTask.java`, `task/SendEmailTask.java`; `cp-task-manager/.../executor/TaskExecutor.java:227-252`, `cp-task-manager/.../repository/JobsRepository.java` (pickup query) |
-| D3 | **Delivery-status classification (eager failure)** | Only `{technical-failure, permanent-failure, virus-scan-failed}` are `FAILED`; everything else (incl. `temporary-failure`, `validation-failed`, `not found`, unknown→`unexpected`) is treated as **in-progress and re-polled** | Same classification **changed** (implemented): in-progress is defined **positively** as `{accepted, created, sending, received, pending-virus-check}` (+ `delivered` = success); **all** other statuses are terminal failure. Paired with an in-task exhaustion handler (see D2) that marks failed once status-check retries are spent | **Yes — deliberate divergence** | GOV.UK Notify docs: `temporary-`/`permanent-failure` are Notify's final verdict on a message (Notify already retried up to 72h during `sending`); re-**polling** an existing id can never flip to `delivered`. Unknown→`unexpected` re-polling is meaningless. Divergence reaches legacy's eventual end-state (failure) **eagerly** and closes the D2 hot-loop for these statuses. "Resend on temporary/technical failure" is a separate feature legacy also lacked | new: `sender/NotificationStatus.java`, `task/CheckEmailStatusTask.java:68-84`; legacy: `.../client/NotificationStatus.java`, `.../task/processors/EmailStatusResponseProcessor.java`; [Notify statuses](https://docs.notifications.service.gov.uk/rest-api.html) |
-| D4 | **Attachment reference: `fileId` → `fileUri`; `materialUrl` kept** | Attachment referenced by **`fileId`** (a centralised file-service identifier the service resolves) or **`materialUrl`** (a Material query link) | New BYO-filestore model (FR-004): the file attachment is referenced by **`fileUri`**, a direct Azure Blob URI the attachment downloader addresses via managed identity (no SAS); its filename is derived from the blob name (`EmailSender.filenameFrom` via `BlobUrlParts.parse(fileUri).getBlobName()`, then last path segment). **`materialUrl` is supported again** (same name and type as legacy): the document is fetched through Material and attached with the filename Material reports (see D8–D10). A non-blank `materialUrl` takes precedence over `fileUri`; a blank one counts as absent (legacy `isMaterialUrlPresentAndValid` parity) | Yes — permanent (`fileId`); `materialUrl` restored | Fits the MbD BYO-filestore platform; direct blob addressing replaces the centralised file-service. Filename derivation reuses the same `BlobUrlParts` parser already used by `BlobClientFactory` on the same URI, so it is URL-decoded and query/SAS-safe. **Rollback caution:** an image from before `materialUrl` support silently ignores the field (unknown properties are dropped), so it would send the email **without the document** and mark it SENT. Roll back past this change only before producers send `materialUrl`, or after every queued `SEND_EMAIL` job carrying `materialUrl` has drained | new: `contracts/command-send-email-notification.schema.json`, `contracts/command-send-email-notification-legacy.schema.json` (`fileId`), `command/SendEmailCommand.java` (`fileUri`, `materialUrl`), `sender/EmailSender.java`, `task/SendEmailTask.java` (precedence), `blob/BlobClientFactory.java` |
-| D5 | **Blob host allow-list (SSRF / Managed-Identity-token guard)** | Endpoint + container were **JNDI-pinned** (`azure.filestore.endpoint` / `container-name`); nothing on the wire could redirect the MI token, so no host check existed | The wire-borne `fileUri` (D4) carries scheme/host/container/blob. `BlobClientFactory` now validates **`https` + host ∈ configured allow-list** (`cp.notification.blob.allowed-hosts`, set per env/stack in the Helm overlay) **before** attaching a token, rejecting anything else as `DisallowedBlobHostException` (terminal, no retry). Empty list ⇒ **fail-closed** in Workload-Identity mode; connection-string/local (Azurite) mode is exempt | **Yes — new control** | Legacy needed no equivalent because the account was config-pinned; carrying a full URI on the queue introduces an SSRF + MI-token-exfil surface, so the host must be constrained. No behaviour change for valid CP `fileUri`s | new: `blob/BlobHostValidator.java`, `blob/DisallowedBlobHostException.java`, `blob/BlobClientFactory.java`; legacy: `referencedata .../blobstore/AzureFileStoreBlobContainerClientProducer.java` (JNDI-pinned endpoint + container), `.../ReferenceDataFileInterceptor.java` (UUID blob name) |
-| D6 | **GOV.UK Notify corporate egress proxy** | Notify call routed through a corporate egress proxy (`gov.notify.proxy.enabled=true`, JNDI; host/port from `outgoing.proxy.*`, type http) | Proxy support ported (`cp.notification.govnotify.proxy.{enabled,host,port}` → 3-arg `NotificationClient`) but **disabled by default** — reaches `api.notifications.service.gov.uk` by **direct egress**; enabled per-environment only if egress sanity fails | **Yes — deliberate default** | The MbD service's AKS pods have verified direct outbound 443, unlike the WildFly estate the legacy proxy was written for; default-off avoids a needless hop and a proxy-host dependency, and the toggle is retained for any environment that blocks direct egress. **Risk:** direct egress is unverified until sanity confirms it — check per environment before go-live (see operating rule below) | new: `sender/GovNotifyConfig.java`, `src/main/resources/application.yaml` (`cp.notification.govnotify.proxy.*` — default off); legacy: `cpp-aks-deploy` `ansible/group_vars` (`gov.notify.proxy.*` + `outgoing.proxy.*`) |
-| D7 | **Notification query API removed** | RAML **query API** (`notificationnotify-query-api.raml`: `GET /notification/{notificationId}`, `GET /notification`) over the view store | **No query API.** The gateway's own interim `GET /notifications/{notificationId}` and `GET /notifications` (NG-S04) are **removed**, with their OpenAPI contract. Inbound HTTP is **actuator-only and deny-by-default** (`SecurityConfig` permits only `/actuator/health/**`, `/actuator/info`, `/actuator/prometheus`; everything else is refused) | **Yes — deliberate removal** | The interim API returned **every column including `send_to_address`** (personal data), was **unauthenticated**, and had **no known consumer** (securing it, NG-S14 / FR-024, was undecided). Support reads move to **logs, the `ReplyTo` result events and the read-only DB role** (`pgreadonly`). Breaking for any undeclared caller; rollback is the previous image plus the Flux route. Supersedes FR-009, FR-024, NG-S04, NG-S14 | new: `web/SecurityConfig.java`; removed: `web/NotificationQueryController.java`, `service/NotificationQueryService.java`, `contracts/openapi/gov-uk-notify-gateway.openapi.yaml`; legacy: `notificationnotify-query/notificationnotify-query-api/src/raml/notificationnotify-query-api.raml`; KB change `2026-10-notify-gateway-material-url` ADR-004 |
-| D8 | **`materialUrl` resolution: Material host only** | `DownloadRestClient` fetches the `materialUrl` as given (`http://localhost:8080/material-query-api/...` reaches Material only through the WildFly pods' Istio `egress-localhost-bind` Sidecar); a generic non-Material URL branch also exists | `MaterialUrlResolver` resolves by host against `CP_NG_MATERIAL_BASE_URL`: a link whose scheme, host and port equal the base URL's is used as sent; a `localhost` / `127.0.0.1` link whose path starts `/material-query-api/` has scheme, host, port and that prefix replaced by the base URL (rest of path and query kept); **anything else is refused with no HTTP call**. Under the `localhost` rule a path with a `..` segment is also refused — checked on the decoded path (so `%2e%2e` counts) and ignoring any `;` path parameters (so `..;` counts). The legacy generic-URL branch is **not ported** | **Yes — deliberate** | The Sidecar only selects `wildfly-app` pods, so `localhost:8080` is refused from the gateway pod; the rewrite reproduces the mesh route in the gateway alone. Refusing other hosts stops the system user (`CJSCPPUID`, D11) ever going to a non-Material host (SSRF) | new: `material/MaterialUrlResolver.java`, `material/MaterialClient.java`; KB change `2026-10-notify-gateway-material-url` ADR-002 (KB numbering); legacy: `cpp-context-notification-notify` `DownloadRestClient`, `cpp-context-material` `MaterialUrls.BASE_URI` |
-| D9 | **SAS document download: built-in link checks, no redirects** | `DocumentDownloadClient` opens whatever `Location` Material returns (`new URL(location).openStream()`), following redirects, with no size streaming cap | `SasDocumentFetcher` uses the **one bare JDK `HttpClient` shared with the Material query** (HTTP/1.1, `Redirect.NEVER`, no authenticator, no default headers) — never `BlobClientFactory` / `AttachmentDownloader`. The SAS request is **credential-less because nothing is added to it**: `CJSCPPUID` and the correlation id are set per request on the Material query only, and no Managed-Identity token is involved; the integration test proves no `Authorization`, `CJSCPPUID` or correlation header reaches the SAS host. Its read timeout is `sas-read-timeout`; connect uses the shared `connect-timeout`. Each call (the Material query and the SAS download) is also bounded by an overall deadline of connect + read timeout, after which the request is cancelled. Before the request `SasLinkValidator` requires **`https`** and a host ending **`.blob.core.windows.net`** (built in, no config switch). The 15 MB cap (`cp.notification.blob.max-attachment-bytes`) is enforced from `Content-Length`, or by stopping the read when it is absent. The link is used once, in memory, never persisted or logged; `CP_NG_BLOB_ALLOWED_HOSTS` / `BlobHostValidator` are unchanged | **Yes — new control** | The SAS link is a bearer credential on Material's own storage account; following redirects or fetching any host would let a bad answer steer the download anywhere. Adding nothing to the request keeps the gateway's identity out of it | new: `material/SasLinkValidator.java`, `material/SasDocumentFetcher.java`, `material/MaterialConfig.java` (shared `materialHttpClient`); KB change `2026-10-notify-gateway-material-url` ADR-003 (KB numbering); legacy: `cpp-context-notification-notify` `DocumentDownloadClient` |
-| D10 | **Material document sent through `prepareUpload(bytes, filename)`** | Legacy hand-builds the Notify upload object `{file, is_csv}` for the Material document (`StringEscapeUtils.escapeJson` on the filename) | The Material document goes through the same `NotificationClient.prepareUpload(bytes, filename)` the `fileUri` path already uses, with the filename Material returns in `Content-Location` (text after `filename=`, legacy parity, no fallback name) | **Yes — same observable outcome** | The client library builds the current upload object and encodes the filename; the recipient gets the same Notify download link in the email. One attachment path for both sources | new: `sender/EmailSender.java`, `sender/Attachment.java`, `sender/GovNotifyClient.java` (unchanged); legacy: `cpp-context-notification-notify` email sender (`material_url` personalisation) |
-| D11 | **Material system user: same account, sourced from Key Vault, checked at startup** | Legacy sends its own context system user (`SystemUsers.NOTIFICATION_NOTIFY`) as `CJSCPPUID` on the Material query, resolved through `ServiceContextSystemUserProvider` from the JNDI value backed by Vault `secret/<env>/<stack>/system_users_notificationnotify_password` | The gateway sends **the same account** (parity: no new user, no priming or Users & Groups change). Its UUID comes from env `CP_NG_SYSTEM_USER_ID`, mapped by Flux from Key Vault secret `CP-NG-SYSTEM-USER-ID` (a per-environment copy of the Vault value). It is **mandatory at startup**: the app refuses to start unless it is a UUID, and it is never logged. The Material base URL is not a secret: `application.yaml` defaults it to Material's in-namespace Service (`http://material-service-wildfly-app/material-service`, the same in every environment), overridable by `CP_NG_MATERIAL_BASE_URL`, and the app refuses to start if it is not an absolute http(s) URL | **Yes** | Spring Boot pods have no JNDI/Vault binding, so the value must arrive via Key Vault. Failing fast makes a missing secret visible at deploy rather than as Material 403s. Risks: the Vault and Key Vault copies can drift (shows as 403s; mitigated by an equality check at rollout); Material's audit attributes gateway calls to notification-notify (the gateway's per-download log line is the attribution record); retiring legacy must keep the account and the Key Vault copy while the gateway uses them | new: `material/MaterialProperties.java`, `material/MaterialSettings.java`, `material/MaterialConfig.java`; ADR-003 (decision to reuse the account); legacy: `cpp-context-notification-notify` `DownloadRestClient`, `ServiceContextSystemUserProvider` |
-| D12 | **Material attachment failures: retry or fail** | `EmailMaterialDownloader` turns a Material non-200 into an `ErrorResponse` with that status, and an `IOException` (which includes any SAS non-200 from `URL.openStream()`) into status `999`; `FailureSelector` then fails `400` / `413` permanently and retries everything else. A Material `200` with no `Location` or no `filename=` throws an unchecked `NullPointerException` / `ArrayIndexOutOfBoundsException` that is never classified and escapes the task. The SAS fetch follows redirects; there are no timeouts and no link checks | `MaterialAttachmentException` carries a **`retryable` flag set at each throw site**, and `SendEmailTask` branches on that flag, not on the status code (the work order asks for separate permanent and transient Material failures; the flag is one type with the same split). **Permanent** (FAILED at once, no retry): refused `materialUrl` (D8) and rejected SAS link (D9), both with **no HTTP call** and status `null`; Material `400` / `413`; **SAS `400`**; document over 15 MB (`413`). **Retryable** (retried, each attempt asking Material for a fresh link, then FAILED with the last status): Material timeout, I/O error or interrupt (status `null`), Material `200` with no `Location` or filename (status `200`), any other Material non-200, SAS redirect (not followed, D9), SAS `403` / `404` / `5xx` and any other SAS non-200, SAS timeout, I/O error or interrupt (status `null`). Retry durations are the unchanged `email-durations-secs`. Each failed stage writes one log line with stage, outcome, status and the exception **message only** (never the throwable, the Material host, the base URL, the system user or the SAS query) | **Yes** — except SAS `400`, which is a divergence to confirm | Same outcome as legacy for Material `400`/`413`, Material `403`/`404`/`5xx`, SAS `403`/`404`/`5xx` and over-size documents. Differences: (1) refused links, rejected SAS links, redirects and timeouts are new controls, so they have no legacy equivalent; (2) a `200` without `Location` or filename is retried and then FAILED, where legacy left the task to an unhandled exception; (3) **SAS `400` is permanent, while legacy retried it** (as `999`) — no AC requires either, so confirm or restore parity; (4) a failure with no HTTP response records status **`null`** in `notification-failed`, where legacy recorded **`999`** — consumers keying on `999` see `null`; (5) the 15 MB check stops reading early, where legacy downloaded the whole file first. Exhaustion uses D2's final-attempt reschedule | new: `material/MaterialAttachmentException.java`, `material/MaterialUrlResolver.java`, `material/SasLinkValidator.java`, `material/MaterialClient.java`, `material/SasDocumentFetcher.java`, `material/MaterialAttachmentDownloader.java`, `task/SendEmailTask.java`, `task/TransientFailurePolicy.java`; legacy: `cpp-context-notification-notify` `EmailMaterialDownloader`, `DocumentDownloadClient`, `FailureSelector`, `SenderErrorResponseProcessor`; `cp-task-manager` `JobsRepository` (pickup query), `TaskExecutor` |
-| D13 | **Office 365 send: legacy function reused, with differences** | `MicrosoftOffice365ClientService` / `HttpConnectionHelper` POST the email to the notifyatt Azure Function. `HttpConnectionHelper` logs the full URL (including the function key), recipient and personalisation; a `200` whose body cannot be parsed throws an unclassified exception; an I/O failure records status `999` | Same function, request, headers, success handling and `400`/`413`-permanent classification (ADR-004), except: (1) see D14 for when the route is taken; (2) a `200` the gateway cannot read is still **SENT**, with an empty subject and body; (3) a failure with no HTTP response records status **`null`**; (4) logs carry the notification id and HTTP status only — never the endpoint, key, recipient or personalisation; (5) the endpoint and subscription key are **mandatory at startup** (`CP_NG_OFFICE365_ENDPOINT`, `CP_NG_OFFICE365_SUBSCRIPTION_KEY`); (6) after a `200`, SENT is recorded by a separate **`RECORD_SENT` task** (scheduled in the same transaction that completes `SEND_EMAIL`), so a failure there is retried on `email-durations-secs` without calling the function again; it never marks FAILED, and when the last retry fails its job is left **parked** in `jobs` (retries remaining `0`, never picked up again) for manual replay, with an ERROR log; (7) a request that cannot be serialised fails **permanently** with no call and status `null`; (8) the call is **bounded**: connect timeout 30s, request timeout 300s (`CP_NG_OFFICE365_CONNECT_TIMEOUT` / `_REQUEST_TIMEOUT`); a timeout is retried, status `null` | **Yes** | (1) see D14; (2) a `200` means the function has sent the email, and a retry would send it again, while legacy's escaping exception would leave the gateway's notification stuck `QUEUED` (D2) after up to 7 sends; (3) as D12(4); (4) the endpoint carries the function key; (5) legacy's missing JNDI value also failed the deploy, and failing fast shows a missing secret at deploy; (6) legacy hands this step to a `notificationnotify.command.mark-as-sent` command on Artemis (`CompleteHandler`), which is redelivered and then dead-lettered, never resent; `RECORD_SENT` is the same hand-off, and the parked job stands in for the DLQ until NG-S11 adds one. `markSent` runs in its own transaction there, because joined to the task's transaction its failure would roll the task back and cp-task-manager would rerun it at once without using a retry. Remaining risk, as legacy: if the `SEND_EMAIL` commit itself fails after the `200`, the task is retried and the email can be sent twice; (7) a retry would fail the same way; (8) legacy had no timeouts (`HttpClients.createDefault()`); here the call runs inside cp-task-manager's transaction, so a hung connection would hold a DB connection and the job lock indefinitely — the Function's ~230s front-end cut-off only helps once the request reaches it. 300s sits above that cut-off, so a slow but working Function still answers; a timed-out call that the Function completes can send the email twice on the retry, the same risk as the 230s drop. **Replaying a parked `RECORD_SENT` job** (DB write, needs approval): set its `retry_attempts_remaining` above `0` (and `assigned_task_start_time` to now) so cp-task-manager picks it up again; if a previous attempt's `markSent` had already published before its commit failed, the replay publishes a second `notification-sent`, which consumers must treat as a duplicate until NG-S12's state guard | new: `sender/Office365Client.java`, `sender/Office365RequestBodyFactory.java`, `sender/Office365ResponseReader.java`, `task/RecordSentTask.java`, `sender/Office365Settings.java`, `sender/Office365Config.java`, `sender/Office365Exception.java`, `task/SendEmailTask.java`; ADR-004; legacy: `cpp-context-notification-notify` `MicrosoftOffice365ClientService`, `HttpConnectionHelper`, `FailureSelector` |
-| D14 | **Office 365 routing: attachment size only, no recipient-domain route** | `EmailSender` sends via Office 365 when the attachment is over 2 MB (`BYTE_LENGTH_2_MB`) **or** the recipient's address ends with a domain in `notify.email.sender.recipientDomainsToRouteThroughOffice365` (code default `cjsm.net`); the domain rule applies with or without an attachment | **Size only:** `EmailClientFactory` sends via Office 365 only when the attachment is over 2 MB (2,097,152 bytes); every other email, whatever the recipient's domain, goes to Gov.UK Notify. The domain route is **not implemented** | **Yes — deliberate** | Every environment sets the domain list to `" "` (`cpp-aks-deploy` `ansible/group_vars/common.yaml.j2`, no environment overrides), so legacy never takes the domain route and no email changes route. Risk: if an environment later needs CJSM routing, it must be added to the gateway; setting the legacy JNDI value has no effect | new: `sender/EmailClientFactory.java`; legacy: `cpp-context-notification-notify` `EmailSender` (`shouldSendToOffice365Notify`, `office365DomainExtensions`); NG-S10 AC-027 (descoped) |
-| D15 | **Send letter: ingress, document and failure recording** | `POST /notifications/{notificationId}` with `application/vnd.notificationnotify.letter+json` (`letterUrl`, `postage`, `clientContext`; Drools: System Users / Online Plea System Users). The `Notification` aggregate emits `letter-queued` / `first-class-letter-queued`; the `send-letter` job GETs `letterUrl` as the context system user (a Material link is followed through its `Location`, any other URL is read directly). Every send error first records `notification-attempted` (status `ATTEMPTED`). The final validation failure's `notification-failed` has no `clientContext` and no `Failed to send notification.` prefix | **ASB command** on its own queue **`ng-send-letter`** (`CP_NG_SERVICEBUS_LETTER_COMMAND_QUEUE`), body `{notificationId, letterUrl, postage, clientContext}` (contract `command-send-letter-notification.schema.json`, same fields as legacy; access control is the queue's RBAC, as D1). Row type `LETTER`, `letter_url` recorded (V1002). `letterUrl` goes through the **Material path** (D8, D9, D11, D12): resolved onto the Material service, a fresh SAS link fetched credential-less; a link to any other host is **refused** (permanent, no call). The PDF goes to `sendPrecompiledLetterWithInputStream` with the CPP notification id as reference; `first` (any case) sends `postage: first`, anything else sends none (Notify default, second class) — as legacy. Send errors use the email classification (`GovNotifyFailureClassifier`, D12) and retry on `letter-durations-secs`; no `ATTEMPTED` status. Every `notification-failed` carries `clientContext`; failure messages are the gateway's own (as for email), except the validation one, which keeps legacy's `Validation failed for '<id>' automatic resend attempt, remaining = 0` with `400`. `notification-sent` carries `completedAt` (= `sentTime`, from the UTC clock) and no email fields — as legacy | **Yes** | One command queue per command type is the gateway's ingress design (D1). Every producer of letters (correspondence, progression, resulting) builds `letterUrl` with `MaterialUrlGenerator.pdfFileStreamUrlFor`, a Material link, so the Material path covers them all, and keeps the system user from being sent to any other host (D8). `ATTEMPTED` was only a viewstore status, and the gateway has no query API (D7). Adding `clientContext` to the last validation failure lets the originator correlate it like every other outcome (additive; consumers already accept it). Legacy's `completedAt` used the JVM default zone; the gateway's clock is UTC | new: `command/SendLetterCommand.java`, `messaging/SendLetterConsumer.java`, `messaging/ServiceBusConfig.java`, `service/NotificationIngestionService.java`, `task/SendLetterTask.java`, `sender/GovNotifyClient.java`, `contracts/command-send-letter-notification.schema.json`; legacy: `NotifyCommandApi.sendLetter`, `Notification.send`/`markAsInvalid`, `LetterSender`, `DocumentDownloadClient`, `SenderErrorResponseProcessor`, `FailureSelector`; callers: `NotificationNotifyService` in correspondence, progression, resulting |
-| D16 | **Letter status polling: `received` is sent, validation failure resends, D3 for the rest** | `check-letter-status` (retries `notify.letter.accepted.retry.threshold.durations`, default `60,300,1800,3600,7200,14400`) then, once `accepted`, `check-accepted-letter-status` (`notify.letter.received.retry.threshold.durations`, default `43200` × 16). `received` = sent; `validation-failed` = `mark-as-invalid`: the aggregate re-queues the letter (status `REQUEUED`, new `send-letter` job, fresh download, same reference) up to **5** times, then fails it with `400`; `technical-failure`/`permanent-failure`/`virus-scan-failed` fail at once; **every other status** (incl. `delivered`, `temporary-failure`, `not found`, `cancelled`/unknown) is re-polled until retries run out | Same two tasks, `CHECK_LETTER_STATUS` (`letter-status-durations-secs`) and `CHECK_ACCEPTED_LETTER_STATUS` (`letter-accepted-status-durations-secs`), same defaults, same `received` = sent and same **5 resends** (counter carried in the job data, status `REQUEUED`, a new `SEND_LETTER` job). In-progress is defined positively as `{created, sending, pending-virus-check}` (+ `accepted`, which moves to or stays on the accepted-letter task); **every other status fails at once**, with `Gov.Notify responded with status '<status>'`. Send retries use `letter-durations-secs` (`60,300,1800,3600,7200,14400,14400`). Each list keeps its own final-attempt delay (D2) | **Yes — D3 applied to letters** | As D3: Notify's letter statuses are `accepted`, `received`, `pending-virus-check`, `virus-scan-failed`, `validation-failed`, `technical-failure`, `permanent-failure` and `cancelled`; none of the re-polled failures can turn into `received`, so legacy only reached its failure later. A letter never reaches `delivered`, so treating it as a failure changes nothing in practice. The legacy config keys are named the opposite way round from the tasks they drive; the gateway names them after the tasks | new: `task/CheckLetterStatusTask.java`, `task/CheckAcceptedLetterStatusTask.java`, `task/LetterStatusPoller.java`, `task/LetterJob.java`, `task/TransientFailurePolicy.java`; legacy: `CheckLetterStatusTask`, `CheckAcceptedLetterStatusTask`, `LetterStatusResponseProcessor`, `InvalidRequestHandler`, `RetryService`; [Notify letter statuses](https://docs.notifications.service.gov.uk/rest-api.html#letter-status-descriptions) |
+| # | Area | Legacy | NG | Deliberate? |
+|---|------|--------|----|-------------|
+| [D1](#d1-send-email-ingress) | Send-email ingress | Synchronous REST command API | Asynchronous Service Bus queue `ng-send-email`; no business HTTP endpoints | Yes |
+| [D2](#d2-email-delivery-status-classification) | Email delivery-status classification | Fails only `technical-failure`, `permanent-failure`, `virus-scan-failed`; re-polls every other status until retries run out | Re-polls only in-flight statuses; every other status fails at once; poll `404` is permanent | Yes |
+| [D3](#d3-attachment-reference) | Attachment reference | `fileId` (file-service) or `materialUrl` | `fileUri` (direct Azure Blob URI) or `materialUrl` | Yes |
+| [D4](#d4-blob-host-allow-list) | Blob host allow-list | Blob endpoint pinned by config; no host check | `fileUri` host must be on a configured allow-list | Yes — new control |
+| [D5](#d5-govuk-notify-egress-proxy) | GOV.UK Notify egress proxy | Notify reached through the corporate proxy | Direct egress; proxy can be enabled per environment | Yes |
+| [D6](#d6-query-api-removed) | Query API removed | RAML query API over the view store | No query API; HTTP is actuator-only | Yes — removal |
+| [D7](#d7-materialurl-resolution) | materialUrl resolution | Fetches the link as given | Material host only; `localhost` links rewritten; anything else refused | Yes |
+| [D8](#d8-sas-document-download) | SAS document download | Opens any link Material returns, follows redirects | `https` Azure Blob links only, no redirects, no credentials, 15 MB cap | Yes — new control |
+| [D9](#d9-office-365-send) | Office 365 send | Unreadable `200`: unhandled exception, job re-runs every hour and **sends the email again** each time | Unreadable `200` = SENT; SENT recorded by a separate task; calls time out | Yes |
+| [D10](#d10-office-365-routing) | Office 365 routing | Office 365 for attachments over 2 MB **or** listed recipient domains | Office 365 for attachments over 2 MB only | Yes |
+| [D11](#d11-send-letter) | Send letter | REST command; any `letterUrl` host read; final validation failure has no `clientContext` | Service Bus queue `ng-send-letter`; Material links only; `clientContext` on every failure | Yes |
+| [D12](#d12-letter-status-polling) | Letter status polling | Fails only `technical-failure`, `permanent-failure`, `virus-scan-failed`; re-polls every other status | Re-polls only in-flight statuses; every other status fails at once | Yes |
+| [D13](#d13-result-events) | Result events | `public.notificationnotify.events.notification-sent` / `-failed`, published to the **public event topic** for any subscriber | `notification-sent` / `notification-failed`, sent to the requester's **`ReplyTo` queue** only | Yes |
 
-## GOV.UK Notify status contract (basis for D3 — why the deviation is safe)
+Not deviations (legacy parity is kept, only the implementation differs): retry exhaustion
+([Retry exhaustion implementation](#retry-exhaustion-implementation)), the Material document upload
+(`prepareUpload(bytes, filename)`), the [Material system user](#material-system-user) and
+[Material and SAS failure classification](#material-and-sas-failure-classification).
+
+## Deviation details
+
+### D1. Send-email ingress
+
+- **Legacy:** synchronous REST command API (`POST /notifications/{notificationId}`) in front of an async JMS handler.
+- **NG:** Service Bus consumer (`SendEmailConsumer`); no REST command and no business HTTP endpoints (D6).
+- **Why / risk:** fits the Modern-by-Default platform. Callers become fire-and-forget and read the outcome from the `ReplyTo` result events.
+- **References:** `messaging/SendEmailConsumer.java`, `messaging/ServiceBusConfig.java`; legacy `notificationnotify-command-api.raml`.
+
+### D2. Email delivery-status classification
+
+**Email status returned by `GET /v2/notifications/{id}`** (meanings: [GOV.UK Notify status contract](#govuk-notify-status-contract-basis-for-d2--why-the-deviation-is-safe)):
+
+| Notify status | Legacy | NG | Changed? |
+|---------------|--------|----|----------|
+| `created` | in progress — re-poll | in progress — re-poll | no |
+| `sending` | in progress — re-poll | in progress — re-poll | no |
+| `accepted`, `received`, `pending-virus-check` (letter statuses) | in progress — re-poll | in progress — re-poll | no |
+| `delivered` | SENT | SENT | no |
+| `permanent-failure` | FAILED at once | FAILED at once | no |
+| `technical-failure` | FAILED at once | FAILED at once | no |
+| `virus-scan-failed` | FAILED at once | FAILED at once | no |
+| `temporary-failure` | re-poll until retries run out, then FAILED | **FAILED at once** | **yes** |
+| `validation-failed` | re-poll until retries run out, then FAILED | **FAILED at once** | **yes** |
+| `not found` | re-poll until retries run out, then FAILED | **FAILED at once** | **yes** |
+| `cancelled` or any unknown value (→ `unexpected`) | re-poll until retries run out, then FAILED | **FAILED at once** | **yes** |
+
+**HTTP errors on the status poll** (legacy `FailureSelector`, NG `GovNotifyFailureClassifier`):
+
+| Error | Legacy | NG | Changed? |
+|-------|--------|----|----------|
+| `400`, `413` | permanent | permanent | no |
+| `404` `NoResultFound` (unknown id, or past the 7-day retention) | temporary — retried, then FAILED | **permanent — FAILED at once** | **yes** |
+| `401`, `403` | temporary | temporary | no (kept on purpose) |
+| `429`, `5xx`, any other HTTP status | temporary | temporary | no |
+| non-HTTP error (status `0`) | permanent | permanent, **except `SSLHandshakeException`, which is retried** | **yes** |
+
+Legacy lists the **failure** statuses and treats everything else as in progress; NG lists the **in-progress**
+statuses and treats everything else as a failure (`Gov.Notify responded with status '<status>'`).
+
+- **Why / risk:** no failure status can turn into `delivered` on a later poll; the docs' remedy for each is a new send, which a poll cannot do ([GOV.UK Notify status contract](#govuk-notify-status-contract-basis-for-d2--why-the-deviation-is-safe)). NG reaches legacy's end state (FAILED) at once instead of after the retry window.
+- **References:** `sender/NotificationStatus.java`, `task/CheckEmailStatusTask.java`, `sender/GovNotifyFailureClassifier.java`; legacy `client/NotificationStatus.java`, `EmailStatusResponseProcessor`, `FailureSelector`.
+
+### D3. Attachment reference
+
+- **Legacy:** attachment by `fileId` (file-service) or `materialUrl`.
+- **NG:** `fileUri`, a direct Azure Blob URI read with managed identity (filename = last segment of the blob name), or `materialUrl` (D7, D8). A non-blank `materialUrl` wins; a blank one counts as absent, as legacy.
+- **Why / risk:** BYO file store replaces the central file-service. **Rollback:** an image without `materialUrl` support drops the field and sends the email without the document, so roll back only before producers send it or once queued jobs carrying it have drained.
+- **References:** `contracts/command-send-email-notification.schema.json`, `command/SendEmailCommand.java`, `sender/EmailSender.java`, `task/SendEmailTask.java`.
+
+### D4. Blob host allow-list
+
+- **Legacy:** blob endpoint and container pinned in JNDI; nothing on the wire chose the host.
+- **NG:** `fileUri` must be `https` with a host in `cp.notification.blob.allowed-hosts`, checked before a token is attached; otherwise `DisallowedBlobHostException` (permanent). An empty list fails closed (Azurite/connection-string mode exempt).
+- **Why / risk:** a URI on the queue could otherwise send the managed-identity token anywhere (SSRF). No change for valid `fileUri`s.
+- **References:** `blob/BlobHostValidator.java`, `blob/BlobClientFactory.java`.
+
+### D5. GOV.UK Notify egress proxy
+
+- **Legacy:** Notify reached through the corporate egress proxy (`gov.notify.proxy.*`, `outgoing.proxy.*`).
+- **NG:** proxy support ported (`cp.notification.govnotify.proxy.*`) but **off by default**; direct egress.
+- **Why / risk:** AKS pods have direct outbound 443. Direct egress must be confirmed per environment before go-live ([operating rule](#govuk-notify-egress-proxy--operating-rule-basis-for-d5)).
+- **References:** `sender/GovNotifyConfig.java`, `application.yaml`.
+
+### D6. Query API removed
+
+- **Legacy:** RAML query API over the view store (`GET /notification/{notificationId}`, `GET /notification`), which also showed the interim `ATTEMPTED` status recorded on every send error.
+- **NG:** no query API; the interim NG-S04 endpoints are removed. HTTP is actuator-only and deny-by-default. The row stays `QUEUED` until SENT or FAILED, and failed attempts are logged.
+- **Why / risk:** the interim API exposed personal data (`send_to_address`), was unauthenticated and had no known consumer. Support reads use logs, the result events and `pgreadonly`. Breaking for any undeclared caller. Supersedes FR-009, FR-024, NG-S04, NG-S14.
+- **References:** `web/SecurityConfig.java`; legacy `notificationnotify-query-api.raml`.
+
+### D7. materialUrl resolution
+
+- **Legacy:** fetches `materialUrl` as given (`localhost:8080` works only through the WildFly pods' Istio sidecar); a generic non-Material branch also exists.
+- **NG:** `MaterialUrlResolver` accepts a link on `CP_NG_MATERIAL_BASE_URL`, rewrites a `localhost`/`127.0.0.1` `/material-query-api/` link onto it (refusing `..` segments, encoded or not), and refuses anything else with no call.
+- **Why / risk:** reproduces the mesh route from the gateway pod, and keeps the system user ([Material system user](#material-system-user)) off non-Material hosts.
+- **References:** `material/MaterialUrlResolver.java`, `material/MaterialClient.java`.
+
+### D8. SAS document download
+
+- **Legacy:** opens whatever `Location` Material returns, follows redirects, no size cap while reading.
+- **NG:** `https` and a `.blob.core.windows.net` host only; no redirects; nothing added to the request (no token, `CJSCPPUID` or correlation id); bounded by timeouts; 15 MB cap enforced while reading; link never stored or logged.
+- **Why / risk:** the SAS link is a bearer credential; this stops a bad answer steering the download, and keeps the gateway's identity out of it.
+- **References:** `material/SasLinkValidator.java`, `material/SasDocumentFetcher.java`, `material/MaterialConfig.java`.
+
+### D9. Office 365 send
+
+**Office 365 function responses** (legacy `HttpConnectionHelper` + `FailureSelector`, NG `Office365Client`):
+
+| Response | Legacy | NG |
+|----------|--------|----|
+| `200`, readable body | SENT | SENT (recorded by the `RECORD_SENT` task) |
+| `200`, unreadable body | unhandled exception; the job re-runs every hour and **calls the function again — another email each time**, notification stays `QUEUED` | **SENT**, empty subject and body |
+| `400`, `413` | permanent | permanent |
+| any other non-200 | retried | retried |
+| I/O error | retried | retried |
+| timeout (connect 30s, request 300s) | no timeout | **retried** |
+| request cannot be serialised | — | **permanent, no call** |
+
+- **Unreadable `200`:** a `200` means the function has sent the email (the function replies `200` only after the SMTP send), so NG records SENT; legacy's parse exception escapes the jobstore, which re-runs the job hourly with no limit and sends the email each time.
+- **`RECORD_SENT`:** SENT is recorded by a separate task, so a failure there is retried without calling the function again; after the last retry the job is **parked** (retries `0`) for manual replay, as legacy's dead-lettered `mark-as-sent`. Replay (DB write, needs approval): set `retry_attempts_remaining` above `0` and `assigned_task_start_time` to now; consumers may then see a duplicate `notification-sent`.
+- **Timeouts:** legacy had none; a hung call would hold a DB connection and the job lock. 300s sits above the function's ~230s cut-off; a timed-out call the function completes can send twice on retry.
+- **Also:** endpoint and key mandatory at startup; logs carry only the notification id and HTTP status (legacy logged the function key, recipient and personalisation). Routing: D10.
+- **References:** `sender/Office365Client.java`, `sender/Office365ResponseReader.java`, `task/RecordSentTask.java`, ADR-004; legacy `HttpConnectionHelper`, `MicrosoftOffice365ClientService`.
+
+### D10. Office 365 routing
+
+- **Legacy:** Office 365 when the attachment is over 2 MB **or** the recipient domain is in `recipientDomainsToRouteThroughOffice365`.
+- **NG:** over 2 MB only; the domain route is not implemented.
+- **Why / risk:** every environment sets the domain list to `" "`, so no email changes route. If CJSM routing is ever needed it must be built in the gateway.
+- **References:** `sender/EmailClientFactory.java`; legacy `EmailSender.shouldSendToOffice365Notify`.
+
+### D11. Send letter
+
+| Part | Legacy | NG |
+|------|--------|----|
+| Ingress | `POST /notifications/{notificationId}` with `application/vnd.notificationnotify.letter+json` (Drools: System Users / Online Plea System Users) | Service Bus command on its own queue **`ng-send-letter`** (`CP_NG_SERVICEBUS_LETTER_COMMAND_QUEUE`); same fields `{notificationId, letterUrl, postage, clientContext}` (`command-send-letter-notification.schema.json`); access control is the queue's RBAC |
+| `letterUrl` | a Material link is followed through its `Location`; **any other URL is read directly** | **Material path only** (D7, D8, [Material system user](#material-system-user)): resolved onto the Material service, fresh SAS link fetched credential-less; any other host is **refused** (permanent, no call) |
+| Final validation failure | `notification-failed` has **no `clientContext`** | `notification-failed` carries `clientContext`, like every other outcome |
+
+Everything else matches legacy: postage, the precompiled-letter call, send-error retries ([Material and SAS failure classification](#material-and-sas-failure-classification)), the 5 resends on `validation-failed` (D12) and `notification-sent`.
+
+- **Why / risk:** one queue per command (D1). Every letter producer (correspondence, progression, resulting) sends a Material link, so none is affected; a non-Material URL would now be refused. `clientContext` on the last failure is additive.
+- **References:** `messaging/SendLetterConsumer.java`, `task/SendLetterTask.java`, `contracts/command-send-letter-notification.schema.json`; legacy `LetterSender`, `SenderErrorResponseProcessor`.
+
+### D12. Letter status polling
+
+**Letter status returned by `GET /v2/notifications/{id}`** (`CHECK_LETTER_STATUS`, then `CHECK_ACCEPTED_LETTER_STATUS`):
+
+| Notify status | Legacy | NG | Changed? |
+|---------------|--------|----|----------|
+| `created`, `sending`, `pending-virus-check` | in progress — re-poll | in progress — re-poll | no |
+| `accepted` | moves to (or stays on) the accepted-letter poll | moves to (or stays on) the accepted-letter poll | no |
+| `received` | SENT | SENT | no |
+| `validation-failed` | resend (status `REQUEUED`, new send job) up to **5** times, then FAILED `400` | same | no |
+| `technical-failure`, `permanent-failure`, `virus-scan-failed` | FAILED at once | FAILED at once | no |
+| `delivered` | re-poll until retries run out, then FAILED | **FAILED at once** | **yes** (a letter never reaches it) |
+| `temporary-failure`, `not found` | re-poll until retries run out, then FAILED | **FAILED at once** | **yes** |
+| `cancelled` or any unknown value | re-poll until retries run out, then FAILED | **FAILED at once** | **yes** |
+
+Polls use `letter-status-durations-secs` then `letter-accepted-status-durations-secs`; each keeps its own final-attempt delay ([Retry exhaustion implementation](#retry-exhaustion-implementation)). The resend counter is in the job data.
+
+- **Why / risk:** as D2 — no re-polled failure can become `received`, so legacy only failed later. A letter never reaches `delivered`.
+- **References:** `task/LetterStatusPoller.java`, `task/CheckLetterStatusTask.java`, `task/CheckAcceptedLetterStatusTask.java`; legacy `LetterStatusResponseProcessor`, `InvalidRequestHandler`.
+
+### D13. Result events
+
+| | Legacy | NG |
+|---|--------|----|
+| Event names | `public.notificationnotify.events.notification-sent`, `public.notificationnotify.events.notification-failed` | `notification-sent`, `notification-failed` |
+| Where they go | **public event topic** (`public.event` on Artemis, via `NotificationNotifyPublicEventProcessor`); every subscribing context receives them | the Service Bus queue named in the request's **`ReplyTo`**; only the requester receives them |
+| Where the name is | JSON envelope metadata (`name`) | Service Bus message `subject` |
+| Payload | `notification-sent` / `notification-failed` fields | unchanged |
+
+- **Why / risk:** the `public.<context>.events.` prefix marks a CQRS framework event published to the shared public topic. NG sends point-to-point to the requester, so the prefix no longer means anything. Each consumer must read its own reply queue and route on the bare `subject`; a handler for the legacy name (e.g. staging-dvla's `@Handles("public.notificationnotify.events.notification-sent")`) will not receive NG's events. Legacy's other public events (`email-notification-bounced`, `poca-email-notification-received`) are not raised.
+- **References:** `result/NotificationSentEvent.java`, `result/NotificationFailedEvent.java`, `result/ResultEventPublisher.java`, `contracts/notification-{sent,failed}.schema.json`; legacy `NotificationNotifyPublicEventProcessor`, `public-publications-descriptor.yaml`.
+
+## Material and SAS failure classification
+
+**Material and SAS failures** (legacy `EmailMaterialDownloader` + `FailureSelector`, NG `MaterialAttachmentException.retryable`):
+
+| Failure | Legacy | NG |
+|---------|--------|----|
+| `materialUrl` not on the Material host (D7) | fetched as given | **permanent, no HTTP call** |
+| SAS link not `https` Azure Blob (D8) | opened as given | **permanent, no HTTP call** |
+| Material `400`, `413` | permanent | permanent |
+| Material `403`, `404`, `5xx`, any other non-200 | retried | retried |
+| Material `200` without `Location` or `filename=` | unhandled exception escapes the task; the job is picked up again once its lock is an hour old, so it re-runs every hour and stays `QUEUED` | **retried, then FAILED** |
+| Material timeout, I/O error, interrupt | retried | retried |
+| SAS `400`, `403`, `404`, `5xx`, any other non-200 | retried (`IOException`) | retried |
+| SAS redirect | followed | **not followed — retried** |
+| SAS timeout, I/O error, interrupt | retried | retried |
+| Document over 15 MB | permanent, after downloading the whole file | permanent, **stops reading early** |
+
+Every status legacy classified is handled the same way. The refusals are the new controls of D7 and D8. The
+Material `200` row is not a deviation either: legacy's hourly re-run comes from an unhandled exception, and NG
+applies legacy's designed rule (retry on the configured durations, then FAIL) to it, as for retry exhaustion. When there is no HTTP
+response, `notification-failed` omits `statusCode` where legacy sent `999`; the only consumer that reads it
+(subscriptions) copies it when present, so this is not a deviation. Every retry asks Material for a fresh SAS link. Retries use `email-durations-secs`; exhaustion ends FAILED
+with the last status ([Retry exhaustion implementation](#retry-exhaustion-implementation)).
+
+- **Logging:** each failed stage writes one log line with stage, outcome, status and the exception **message only** (never the throwable, the Material host, the base URL, the system user or the SAS query).
+- **Why / risk:** Same outcome as legacy for Material `400`/`413`, Material `403`/`404`/`5xx`, every SAS non-200 (including `400`, retried as legacy did) and over-size documents. Differences: (1) refused links, rejected SAS links, redirects and timeouts are new controls, so they have no legacy equivalent; (2) a `200` without `Location` or filename is retried and then FAILED, where legacy left the task to an unhandled exception that re-runs the job every hour; (3) the 15 MB check stops reading early, where legacy downloaded the whole file first. Exhaustion uses the final-attempt reschedule ([Retry exhaustion implementation](#retry-exhaustion-implementation))
+- **References:** new: `material/MaterialAttachmentException.java`, `material/MaterialUrlResolver.java`, `material/SasLinkValidator.java`, `material/MaterialClient.java`, `material/SasDocumentFetcher.java`, `material/MaterialAttachmentDownloader.java`, `task/SendEmailTask.java`, `task/TransientFailurePolicy.java`; legacy: `cpp-context-notification-notify` `EmailMaterialDownloader`, `DocumentDownloadClient`, `FailureSelector`, `SenderErrorResponseProcessor`; `cp-task-manager` `JobsRepository` (pickup query), `TaskExecutor`
+
+## Material system user
+
+- **Legacy:** Legacy sends its own context system user (`SystemUsers.NOTIFICATION_NOTIFY`) as `CJSCPPUID` on the Material query, resolved through `ServiceContextSystemUserProvider` from the JNDI value backed by Vault `secret/<env>/<stack>/system_users_notificationnotify_password`
+- **NG:** The gateway sends **the same account** (parity: no new user, no priming or Users & Groups change). Its UUID comes from env `CP_NG_SYSTEM_USER_ID`, mapped by Flux from Key Vault secret `CP-NG-SYSTEM-USER-ID` (a per-environment copy of the Vault value). It is **mandatory at startup**: the app refuses to start unless it is a UUID, and it is never logged. The Material base URL is not a secret: `application.yaml` defaults it to Material's in-namespace Service (`http://material-service-wildfly-app/material-service`, the same in every environment), overridable by `CP_NG_MATERIAL_BASE_URL`, and the app refuses to start if it is not an absolute http(s) URL
+- **Why / risk:** Spring Boot pods have no JNDI/Vault binding, so the value must arrive via Key Vault. Failing fast makes a missing secret visible at deploy rather than as Material 403s. Risks: the Vault and Key Vault copies can drift (shows as 403s; mitigated by an equality check at rollout); Material's audit attributes gateway calls to notification-notify (the gateway's per-download log line is the attribution record); retiring legacy must keep the account and the Key Vault copy while the gateway uses them
+- **References:** new: `material/MaterialProperties.java`, `material/MaterialSettings.java`, `material/MaterialConfig.java`; ADR-003 (decision to reuse the account); legacy: `cpp-context-notification-notify` `DownloadRestClient`, `ServiceContextSystemUserProvider`
+
+## Retry exhaustion implementation
+
+Legacy terminalised a notification through the jobstore's exhaust task. `cp-task-manager` has no
+such hook: on exhaustion `TaskExecutor` re-persists the task with `retry_attempts_remaining = 0`,
+and the `JobsRepository` pickup query never picks up a job with no retries left, so the run that
+would see retries exhausted never happens. The gateway keeps legacy behaviour itself:
+
+- `TransientFailurePolicy.retryOrFail` retries while more than one attempt remains.
+- On the **last retry** it reschedules the same task as `INPROGRESS` with no retry, after the last
+  retry duration and with `finalAttempt` in the job data. That keeps the remaining count, so the job
+  runs once more. Every configured duration is used (first attempt plus one retry per duration).
+- When retries are exhausted, or the final attempt fails, it marks the notification FAILED and
+  completes the task.
+
+It is applied at every in-progress retry site so no path can leave a notification stuck `QUEUED`:
+`CheckEmailStatusTask.evaluate` (genuine in-flight status), `CheckEmailStatusTask.handlePollFailure`
+(transient poll error), `SendEmailTask` (transient send, blob and Material errors), and the letter
+tasks (`SendLetterTask`, `LetterStatusPoller`), each with its own retry durations (D12).
+
+Remove the workaround once `cp-task-manager` runs that last job. Scope boundary: this covers only
+terminalisation on exhaustion of the configured retry durations — the DLQ/dead-letter mechanism,
+configurable max-attempts and alerting remain **NG-S11 (FR-020)** scope.
+
+## GOV.UK Notify status contract (basis for D2 — why the deviation is safe)
 
 Our `CheckEmailStatusTask` **re-`GET`s the delivery status of an already-sent notification id**
 (`GET /v2/notifications/{id}`). It does **not** resend. That distinction is what makes eager
 failure safe. The [GOV.UK Notify REST API](https://docs.notifications.service.gov.uk/rest-api.html)
-defines the email delivery statuses as:
+defines each status separately. **It does not group them into "temporary" and "permanent"
+failures**: `temporary-failure` and `permanent-failure` are two individual statuses, not categories,
+and the docs do not say whether any failure status is final. The grouping below is ours, based on
+what each status's documented meaning allows the gateway to do. Quotes are from the docs, checked
+2026-11-03.
 
-| status | documented meaning | in-flight? | our handling |
-|--------|--------------------|-----------|--------------|
-| `created` | queued at Notify, ready to send to the provider | **yes** — re-poll | in-progress |
-| `sending` | sent to the provider; the provider will attempt delivery **for up to 72h** | **yes** — re-poll | in-progress |
-| `delivered` | delivered to the recipient | no | success → `markSent` |
-| `permanent-failure` | the email address does not exist; remove it from your DB | no — **Notify's final verdict** | fail → `markFailed` |
-| `temporary-failure` | not delivered (full inbox / anti-spam) after the sending window | no — **Notify's final verdict** (it already retried up to 72h during `sending`) | fail → `markFailed` |
-| `technical-failure` | a problem between Notify and the provider; "you'll have to try sending your messages again" | no — needs a **new send**, not a re-poll | fail → `markFailed` |
-| 404 `NoResultFound` | unknown notification id **or** past the 7-day retention window | no | fail → `markFailed` (via `GovNotifyFailureClassifier` — see note below) |
-| _(anything else)_ | not part of the contract | n/a | `fromStatus` → `UNEXPECTED_FAILURE` → fail |
+**Email statuses** (what `CheckEmailStatusTask` sees):
+
+| status | Notify docs say | can a re-poll of the same id still reach `delivered`? | our handling |
+|--------|-----------------|------------------------------------------------------|--------------|
+| `created` | "placed the message in a queue, ready to be sent to the provider"; "should only remain in this state for a few seconds" | yes — in flight | in-progress, re-poll |
+| `sending` | "sent the message to the provider"; "the provider will try to deliver the message to the recipient for up to 72 hours"; Notify "is waiting for delivery information" | yes — in flight | in-progress, re-poll |
+| `delivered` | "The message was successfully delivered." | — | success → `markSent` |
+| `permanent-failure` | "the email address was wrong"; "remove these email addresses from your database" | no — the address is wrong | fail → `markFailed` |
+| `temporary-failure` | "The provider could not deliver the message", e.g. "the recipient's inbox is full or their anti-spam filter rejects your email"; check the content does not look like spam "before you try to send the message again" | no — the docs' remedy is to **send again**, i.e. a new notification | fail → `markFailed` |
+| `technical-failure` | "a problem between Notify and the provider"; "You'll have to try sending your messages again." | no — the message was never sent; the remedy is a **new send** | fail → `markFailed` |
+
+So, from the poll's point of view:
+
+- **In flight (re-poll):** `created`, `sending`. The gateway's in-progress set also holds `accepted`,
+  `received` and `pending-virus-check`, which are letter statuses (below) and do not occur for email.
+- **Temporary (the recipient might accept a later, new message):** `temporary-failure`, and
+  `technical-failure` for email. "Temporary" describes the recipient or the provider, not this
+  notification: the docs' remedy for both is to send the message again. A status poll cannot resend,
+  so the gateway records FAILED with `Gov.Notify responded with status '<status>'` and leaves any
+  resend to the caller (a resend feature is out of scope; legacy had none either).
+- **Permanent (a new message would fail too):** `permanent-failure` — the address is wrong.
+- **Anything else:** not an email status in the docs. `fromStatus` maps an unknown value to
+  `unexpected`, which is not in-progress, so it fails.
+
+**Letter statuses** (what `LetterStatusPoller` sees, D12), from the letter and precompiled-letter tables:
+
+| status | Notify docs say | our handling |
+|--------|-----------------|--------------|
+| `pending-virus-check` | Notify "has not completed a virus scan of the precompiled letter file" | in-progress, re-poll |
+| `accepted` | Notify "has sent the letter to the provider to be printed" | in-progress, moves to the accepted-letter poll |
+| `received` | "The provider has printed and dispatched the letter." | success → sent |
+| `validation-failed` | content "outside the printable area", or the last address line "is not a UK postcode or another country" | resend, up to 5 times, then FAILED `400` (D12) |
+| `virus-scan-failed` | Notify "found a potential virus in the precompiled letter file" | fail — permanent, the file is the problem |
+| `permanent-failure` | "The provider cannot print the letter. Your letter will not be dispatched." | fail — permanent |
+| `technical-failure` | "a problem between Notify and the provider"; "Do not try to send the letter again." | fail — permanent for letters: the docs say **not** to resend |
+| `cancelled` | "Sending cancelled. The letter will not be printed or dispatched." | fail — not in the in-progress set |
+
+`technical-failure` means "send again" for email but "do not send again" for letters. Neither allows a
+re-poll to succeed, so the gateway fails both at once.
+
+**HTTP errors on the poll are classified separately** from the statuses above, by
+`GovNotifyFailureClassifier.isTemporary`. **Permanent** (FAILED at once): `400`, `413`, and `404`
+`NoResultFound`. Notify returns `404` for an unknown id **or** a message outside the retention period
+("The default retention period is 7 days"; "If it's outside the retention period, you may no longer
+get the status of the message"). A non-HTTP error is permanent unless it is an
+`SSLHandshakeException`. **Temporary** (retried on the configured durations, then FAILED): everything
+else, including `401`, `403`, `429` and `5xx`.
 
 **404 is classified permanent in `GovNotifyFailureClassifier`, not just here.** A `NoResultFound`
 surfaces as a `GovNotifyException(404)` from `GovNotifyClient.checkStatus` (and, on the send path,
@@ -64,32 +322,30 @@ would never occur), so it reaches `CheckEmailStatusTask.handlePollFailure` → `
 classifier therefore treats `404` as **permanent** alongside `400`/`413` — a re-poll can never make a
 missing/expired id reappear, so retrying it for the whole ~7.6h window is futile. This diverges from
 legacy `FailureSelector` (permanent set was only `{0, 400, 413}`; `404` was temporary), but is what
-makes this table's "404 → fail" handling actually hold on the poll path. **`401`/`403` deliberately
+makes the "404 → fail" handling actually hold on the poll path. **`401`/`403` deliberately
 stay temporary** (legacy parity): a Notify auth/permission failure is almost always a
 credential/config error, and the multi-hour retry window gives ops a chance to fix the key and
 redeploy so the same queued message succeeds on a later retry — terminalising eagerly would throw that
 recovery opportunity away.
 
-**Why re-polling the non-in-flight statuses is futile.** Notify performs its own delivery
-retries (up to 72h) *while the status is `sending`*. Once it settles on
-`temporary-`/`permanent-failure`, that is its final answer for **that** notification id — a
-subsequent `GET` of the same id will never return `delivered`. The docs' "try sending again"
-advice (for `technical-failure`, and inbox-full `temporary-failure`) means **dispatch a new
-notification** — an operation this status-poll task cannot and must not perform. Therefore, for
-the poll, every status that is not `delivered` and not genuinely in-flight
-(`created/sending/accepted/received/pending-virus-check`) is terminal.
+**Why re-polling the failure statuses is futile.** The provider's delivery attempts, up to 72 hours,
+happen while the status is `sending`. The docs do not state that a failure status is final, but none
+of the failure statuses describes a message that is still being delivered, and the remedy each one
+gives is to fix the address or content and **send a new message** — an operation this status-poll
+task cannot and must not perform. Therefore, for the poll, every status that is not `delivered` and
+not in flight (`created/sending/accepted/received/pending-virus-check`) is terminal.
 
-**Safety of the deviation (D3):** classifying these as terminal changes *when* we conclude
+**Safety of the deviation (D2):** classifying these as terminal changes *when* we conclude
 failure, not *whether* — legacy also ended these notifications in failure, just slowly (via retry
-exhaustion, per D2) or, in the ported code, never (the D2 hot-loop). Eager failure reaches the
-same terminal outcome immediately, with an accurate reason, and — crucially — is what lets D2's
-in-task exhaustion handler apply only to the genuinely in-flight statuses. No notification that
+exhaustion) or, in the ported code before the retry-exhaustion fix, never (the hot-loop). Eager failure reaches the
+same terminal outcome immediately, with an accurate reason, and — crucially — is what lets the
+in-task exhaustion handler ([Retry exhaustion implementation](#retry-exhaustion-implementation)) apply only to the genuinely in-flight statuses. No notification that
 legacy would have delivered is failed by this change, because Notify's own delivery attempts are
 already complete before any of these statuses is returned. Defining in-progress as a **positive
 allow-list** also means any future/unknown Notify status fails safe (terminal) rather than
 re-polling forever.
 
-## GOV.UK Notify egress proxy — operating rule (basis for D6)
+## GOV.UK Notify egress proxy — operating rule (basis for D5)
 
 The legacy per-environment proxy values (`gov.notify.proxy.*`, `outgoing.proxy.*`) are internal infra
 hostnames held in `cpp-aks-deploy` `ansible/group_vars` (the source of truth) — **not** duplicated in
@@ -107,39 +363,34 @@ opt-in fallback:
 
 ## Consequences
 
-- **D2 must be fixed** to restore parity — it is a regression, not an intended change. The in-task
-  exhaustion guard (`retriesExhausted` → `markFailed` + `COMPLETED`) is applied at **all three**
-  in-progress retry sites so no path can leave a notification stuck `QUEUED`:
-  `CheckEmailStatusTask.evaluate` (genuine in-flight status), `CheckEmailStatusTask.handlePollFailure`
-  (transient poll error), and `SendEmailTask` (transient send, blob and Material errors), all through
-  `TransientFailurePolicy.retryOrFail`, which schedules the final attempt itself (see D2) because
-  `cp-task-manager` never runs a job with no retries left. Remove the workaround once `cp-task-manager` runs
-  that last job. Scope boundary: this closes
-  only *terminalisation on exhaustion of the existing `email-durations-secs` bound* — the DLQ/dead-letter
-  mechanism, configurable max-attempts and alerting remain **NG-S11 (FR-020)** scope.
-- **D3 is an accepted, documented divergence** — reviewers should not "restore legacy parity"
-  by reverting it. It is correct on the GOV.UK Notify contract and is what makes D2's fix
-  effective for terminal statuses.
+- **Retry exhaustion** keeps legacy parity, so it is not a deviation. Do not remove the
+  final-attempt workaround until `cp-task-manager` runs a job with no retries left; see
+  [Retry exhaustion implementation](#retry-exhaustion-implementation).
+- **D2 is an accepted, documented divergence** — reviewers should not "restore legacy parity"
+  by reverting it. It is correct on the GOV.UK Notify contract and is what keeps
+  terminal statuses off the retry-exhaustion path.
 - **D1** is an accepted platform-level change; downstream integrators must move to the
-  fire-and-forget model and read the outcome from the result events (there is no query API — D7).
-- **D8–D11** are deliberate: the Material path reaches the same outcome as legacy (the Material document
+  fire-and-forget model and read the outcome from the result events (there is no query API — D6).
+- **D13** changes the result-event names and delivery: consumers read `notification-sent` /
+  `notification-failed` from their own `ReplyTo` queue, not `public.notificationnotify.events.*` from the topic.
+- **D7 and D8** are deliberate: the Material path reaches the same outcome as legacy (the Material document
   attached to the email) without the WildFly-only `localhost` route, without sending the system user or the
   gateway's identity anywhere but Material, and without following the SAS link off Azure Blob Storage.
-- **D12** keeps legacy's retry-or-fail outcome for every Material and SAS status legacy handled, except SAS
-  `400` (permanent here, retried in legacy; to confirm) and the `999` → `null` status for failures with no
-  HTTP response. Exhausted retries end FAILED through D2's final-attempt reschedule.
-- **D13** keeps legacy's Office 365 call (ADR-004), records an unreadable `200` as SENT, and records SENT in a
+- **Material and SAS failure classification** keeps legacy's retry-or-fail outcome for every
+  status legacy handled, so it is not a deviation.
+- **D9** keeps legacy's Office 365 call (ADR-004), records an unreadable `200` as SENT, and records SENT in a
   separate `RECORD_SENT` task (legacy: the `mark-as-sent` command), so a failure there is retried and finally
   parked for manual replay, never resent. A parked `RECORD_SENT` job (retries remaining `0`) is the
-  signal to look for until NG-S11 adds a dead-letter state. **D14** routes to Office 365 on attachment size only; the recipient-domain route, which
+  signal to look for until NG-S11 adds a dead-letter state. **D10** routes to Office 365 on attachment size only; the recipient-domain route, which
   no environment enables, is not implemented.
-- **D7** is a deliberate, breaking removal — reviewers should not re-add a query endpoint without its own
+- **D6** is a deliberate, breaking removal — reviewers should not re-add a query endpoint without its own
   authentication decision; any new HTTP endpoint is refused until explicitly permitted in `SecurityConfig`.
-- **D6** is a deliberate default (proxy off), not a dropped capability — the proxy is ported and
+- **D5** is a deliberate default (proxy off), not a dropped capability — the proxy is ported and
   re-enablable per environment. Open item: egress verification per environment before go-live —
   sanity confirms direct egress, or the proxy is enabled per the operating rule above.
-- New deviations discovered in later reviews should be appended as further rows rather than
-  scattered across PR comments.
+- New deviations discovered in later reviews should be appended as a one-line register row plus a
+  details section (with a full legacy-vs-NG mapping table for any status change), rather than scattered
+  across PR comments.
 
 ## Testing-strategy deviation — atomicity (NG-S02 DoD)
 

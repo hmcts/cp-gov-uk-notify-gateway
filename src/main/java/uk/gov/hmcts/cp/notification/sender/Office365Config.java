@@ -16,7 +16,7 @@ public class Office365Config {
         return Office365Settings.from(properties);
     }
 
-    // Unlike legacy (no timeouts), connect and request are bounded (ADR-002 D13): the call runs inside the task's
+    // Unlike legacy (no timeouts), connect and request are bounded (ADR-002 D9): the call runs inside the task's
     // transaction, so a hung connection would hold a DB connection and the job lock. A timeout is retried.
     @Bean(OFFICE365_HTTP_CLIENT)
     public HttpClient office365HttpClient(final Office365Settings settings) {

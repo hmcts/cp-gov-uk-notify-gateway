@@ -33,7 +33,6 @@ import java.util.concurrent.TimeoutException;
 @Component
 public class SasDocumentFetcher {
     private static final int HTTP_OK = 200;
-    private static final int HTTP_BAD_REQUEST = 400;
     private static final int HTTP_PAYLOAD_TOO_LARGE = 413;
     private static final byte[] DISCARDED = new byte[0];
 
@@ -56,10 +55,6 @@ public class SasDocumentFetcher {
         final HttpRequest request = HttpRequest.newBuilder(sasLink).GET().timeout(readTimeout).build();
         final HttpResponse<byte[]> response = send(request);
         final int status = response.statusCode();
-        if (status == HTTP_BAD_REQUEST) {
-            throw MaterialAttachmentException.permanent(
-                    "The Material document link was rejected by storage (HTTP " + status + ")", status);
-        }
         if (status != HTTP_OK) {
             throw MaterialAttachmentException.retryable(
                     "The Material document could not be downloaded (HTTP " + status + ")", status);

@@ -12,7 +12,7 @@ import tools.jackson.databind.ObjectMapper;
  * Reads the notifyatt Azure Function's {@code 200} response into a {@link SendResult} that is already sent, as legacy
  * {@code EmailSender.getExtractedSendEmailResponseFromOffice365EmailResponse} does: the subject as returned, the
  * body as the text of the second line of {@code templateContent}, and the command's reply-to address or
- * {@code NOREPLY@noreply.com}. An unreadable response still means the email was sent (ADR-002 D13), so it gives
+ * {@code NOREPLY@noreply.com}. An unreadable response still means the email was sent (ADR-002 D9), so it gives
  * an empty subject and body rather than a failure.
  */
 @Component

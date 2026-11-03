@@ -1,6 +1,7 @@
 apply plugin: 'pmd'
 
 pmd {
+  toolVersion = "7.29.0"
   ruleSets = []
   ruleSetFiles = files(".github/pmd-ruleset.xml")
   ignoreFailures = false
