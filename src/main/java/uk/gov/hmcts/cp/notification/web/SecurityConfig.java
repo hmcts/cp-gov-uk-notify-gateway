@@ -8,7 +8,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 
 // The gateway has no business HTTP surface: commands arrive on Azure Service Bus and outcomes leave as
-// result events. The notification query API was removed (ADR-002 D7), so HTTP is deny-by-default and only
+// result events. The notification query API was removed (ADR-002 D6), so HTTP is deny-by-default and only
 // the actuator probe, info and metrics endpoints are reachable. Any endpoint added later is refused
 // until it is explicitly permitted here with its own authentication decision.
 //

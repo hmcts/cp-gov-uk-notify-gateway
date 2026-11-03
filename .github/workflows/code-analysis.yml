@@ -22,6 +22,8 @@ jobs:
       - uses: pmd/pmd-github-action@v2
         id: pmd
         with:
+          # Pinned to match gradle/pmd.gradle, so a new PMD release cannot break CI unannounced
+          version: '7.29.0'
           rulesets: '.github/pmd-ruleset.xml'
           sourcePath: 'src/main/java'
           analyzeModifiedFilesOnly: false

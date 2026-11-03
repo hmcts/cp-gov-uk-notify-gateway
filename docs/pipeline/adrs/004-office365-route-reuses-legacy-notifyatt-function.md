@@ -25,13 +25,13 @@ We will call the legacy function exactly as legacy does.
   command's, or `NOREPLY@noreply.com`.
 - Failures follow legacy `FailureSelector`: `400` and `413` are permanent, everything else is retried on
   `email-durations-secs`. No proxy, as legacy; unlike legacy, connect (30s) and request (300s) timeouts
-  bound the call (ADR-002 D13).
+  bound the call (ADR-002 D9).
 - Endpoint and key arrive from Key Vault (`CP-NG-OFFICE365-ENDPOINT`, `CP-NG-OFFICE365-SUBSCRIPTION-KEY`),
   per-environment copies of Vault `secret/<env>/<stack>/notify_email_fa_endpoint` and
   `.../hearing_slots_subscription_key` (DEV pinned to `devccm01`, MDV/MDT `secret/mdv/validation`). The
   endpoint is a credential: its `code` query parameter is the function key (`clientId` names it). The app
   refuses to start without either value.
-- Deviations from legacy are recorded in ADR-002: D13 (the send) and D14 (routing on attachment size only;
+- Deviations from legacy are recorded in ADR-002: D9 (the send) and D10 (routing on attachment size only;
   the recipient-domain route is not implemented).
 
 ## Options considered

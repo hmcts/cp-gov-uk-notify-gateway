@@ -17,7 +17,7 @@ public class ResultEventSteps {
     public void a_notification_sent_result_event_is_published_to_the_reply_queue() {
         aResultQueue(RESULT_QUEUE)
                 .receivesResultEvent()
-                .withSubject("public.notificationnotify.events.notification-sent")
+                .withSubject("notification-sent")
                 .withField("notificationId", context.getNotificationId())
                 .withField("emailSubject", "Your NCES extract")
                 .withField("emailBody", "Please find your report attached.")
@@ -29,7 +29,7 @@ public class ResultEventSteps {
     public void a_notification_sent_result_event_for_the_office365_email_is_published_to_the_reply_queue() {
         aResultQueue(RESULT_QUEUE)
                 .receivesResultEvent()
-                .withSubject("public.notificationnotify.events.notification-sent")
+                .withSubject("notification-sent")
                 .withField("notificationId", context.getNotificationId())
                 .withField("emailSubject", "Your document is ready")
                 .withField("emailBody", "Please find the document attached.")
@@ -41,7 +41,7 @@ public class ResultEventSteps {
     public void a_notification_sent_result_event_for_the_letter_is_published_to_the_reply_queue() {
         aResultQueue(RESULT_QUEUE)
                 .receivesResultEvent()
-                .withSubject("public.notificationnotify.events.notification-sent")
+                .withSubject("notification-sent")
                 .withField("notificationId", context.getNotificationId())
                 .withField("clientContext", "correspondence")
                 .withFieldPresent("sentTime")
@@ -58,7 +58,7 @@ public class ResultEventSteps {
             final int status) {
         aResultQueue(RESULT_QUEUE)
                 .receivesResultEvent()
-                .withSubject("public.notificationnotify.events.notification-failed")
+                .withSubject("notification-failed")
                 .withField("notificationId", context.getNotificationId())
                 .withField("statusCode", status)
                 .withField("clientContext", "correspondence")
@@ -69,7 +69,7 @@ public class ResultEventSteps {
     public void a_notification_failed_result_event_for_the_letter_saying_no_automatic_resends_remain_is_published() {
         aResultQueue(RESULT_QUEUE)
                 .receivesResultEvent()
-                .withSubject("public.notificationnotify.events.notification-failed")
+                .withSubject("notification-failed")
                 .withField("notificationId", context.getNotificationId())
                 .withField("statusCode", 400)
                 .withField("errorMessage", "Validation failed for '" + context.getNotificationId()
@@ -82,7 +82,7 @@ public class ResultEventSteps {
     public void a_notification_failed_result_event_for_the_letter_is_published_to_the_reply_queue() {
         aResultQueue(RESULT_QUEUE)
                 .receivesResultEvent()
-                .withSubject("public.notificationnotify.events.notification-failed")
+                .withSubject("notification-failed")
                 .withField("notificationId", context.getNotificationId())
                 .withField("clientContext", "correspondence")
                 .conformsTo(NOTIFICATION_FAILED);
@@ -92,7 +92,7 @@ public class ResultEventSteps {
     public void a_notification_failed_result_event_is_published_to_the_reply_queue() {
         aResultQueue(RESULT_QUEUE)
                 .receivesResultEvent()
-                .withSubject("public.notificationnotify.events.notification-failed")
+                .withSubject("notification-failed")
                 .withField("notificationId", context.getNotificationId());
     }
 
@@ -100,7 +100,7 @@ public class ResultEventSteps {
     public void a_notification_failed_result_event_with_status_is_published_to_the_reply_queue(final int status) {
         aResultQueue(RESULT_QUEUE)
                 .receivesResultEvent()
-                .withSubject("public.notificationnotify.events.notification-failed")
+                .withSubject("notification-failed")
                 .withField("notificationId", context.getNotificationId())
                 .withField("statusCode", status);
     }

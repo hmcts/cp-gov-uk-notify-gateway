@@ -43,7 +43,7 @@ identity/RBAC, provisioning, deploy — NG-S05/07/08/09) carry no behavioural-pa
 | FR-006 | cp-task-manager retry/poll timings preserved | [NG-S02](./NG-S02.md) | AC-013 | |
 | FR-007 | ReplyTo-gated result publish | [NG-S03](./NG-S03.md) | AC-014, AC-015 | Split from core send — separable value, independently testable via synthetic `ReplyTo` message |
 | FR-008 | Result-event contract parity (golden master) | [NG-S03](./NG-S03.md) | AC-016 | |
-| FR-009 | Query API returns all columns | [NG-S04](./NG-S04.md) | AC-017, AC-018 | **Superseded by ADR-002 D7 (query API removed).** Read API only; auth sliced to NG-S14 (see FR-024 row) |
+| FR-009 | Query API returns all columns | [NG-S04](./NG-S04.md) | AC-017, AC-018 | **Superseded by ADR-002 D6 (query API removed).** Read API only; auth sliced to NG-S14 (see FR-024 row) |
 | FR-010 | Integration test harness (Testcontainers/ASB emulator/Azurite/WireMock/Awaitility) | *(no dedicated story — folded into DoD, per coordinator decision)* | AC-019 | **Covered via DoD across [NG-S02](./NG-S02.md) (happy path, atomicity, blob 403/404), [NG-S03](./NG-S03.md) (result-queue message), [NG-S10](./NG-S10.md) (O365 stub), [NG-S11](./NG-S11.md) (retry), [NG-S12](./NG-S12.md) (redelivery/idempotency)** — not orphaned |
 | FR-011 | CI validation pipeline (GitHub Actions) | [NG-S05](./NG-S05.md) | AC-020 | |
 | FR-012 | STE simulator/stub routing (Gov.Notify + O365) | [NG-S06](./NG-S06.md) | AC-021 | |
@@ -52,13 +52,13 @@ identity/RBAC, provisioning, deploy — NG-S05/07/08/09) carry no behavioural-pa
 | FR-015 | ASB namespace/queue provisioning + role assignments | [NG-S08](./NG-S08.md) | AC-025 | |
 | FR-016 | Postgres database/schema provisioning | [NG-S09](./NG-S09.md) | (no dedicated AC) | Bundled with FR-017 — deploy needs the DB first |
 | FR-017 | Flux CD GitOps deployment | [NG-S09](./NG-S09.md) | AC-026 | |
-| FR-018 | SenderFactory routing (>2MB → O365; cjsm.net route not implemented, ADR-002 D14) | [NG-S10](./NG-S10.md) | AC-028, AC-029 (AC-027 descoped) | Bundled with FR-019 — routing with no working sender behind it has no value |
+| FR-018 | SenderFactory routing (>2MB → O365; cjsm.net route not implemented, ADR-002 D10) | [NG-S10](./NG-S10.md) | AC-028, AC-029 (AC-027 descoped) | Bundled with FR-019 — routing with no working sender behind it has no value |
 | FR-019 | Office 365 immediate-delivery send (legacy notifyatt Function, ADR-004) | [NG-S10](./NG-S10.md) | AC-030, AC-040, AC-041 | AC-040/AC-041 added with the Office 365 send (after AC-039); not in requirements.md |
 | FR-020 | Failure handling: retry, permanent failure, DLQ | [NG-S11](./NG-S11.md) | AC-031, AC-032, AC-033 | Distinct from FR-022 — bounds *how long* retries continue |
 | FR-021 | *(removed by Stage 2 — dual-write atomicity resolved by co-located transaction; no reconciliation sweep needed)* | — | — | Not carried into Stage 3 |
 | FR-022 | At-least-once safety: state guard + Gov.Notify recover-by-reference | [NG-S12](./NG-S12.md) | AC-035, AC-036 | Distinct from FR-020 — prevents *double-acting* on retries |
 | FR-023 | Observability: logs, metrics, DLQ-depth | [NG-S13](./NG-S13.md) | AC-037, AC-038 | |
-| FR-024 | Secure query API with IDAM auth | [NG-S14](./NG-S14.md) | AC-039 | **Superseded by ADR-002 D7 (query API removed).** Sliced out of NG-S04 — auth pattern was an open ADR (Pattern 1 vs Pattern 2; query-API authentication note retired — see ADR-002 D7) |
+| FR-024 | Secure query API with IDAM auth | [NG-S14](./NG-S14.md) | AC-039 | **Superseded by ADR-002 D6 (query API removed).** Sliced out of NG-S04 — auth pattern was an open ADR (Pattern 1 vs Pattern 2; query-API authentication note retired — see ADR-002 D6) |
 
 **Coverage check:** every FR-001…FR-024 (FR-021 removed by Stage 2) lands in exactly one story.
 Every AC-001…AC-039 in `requirements.md` (AC-034 does not exist — no FR/AC gap, just an unused number)
@@ -99,7 +99,7 @@ NG-S12 (see mapping table above).
   network-boundary security, no in-service token validation) vs. Pattern 2 (Spring Security OAuth2
   resource server against Entra ID, genuine cryptographic JWT validation, the sanctioned
   `cpp-mbd-notification-svc-pilot` blueprint). Genuinely open — no platform-sanctioned winner; full
-  analysis in the query-API authentication note (retired — see ADR-002 D7). An ADR is required before
+  analysis in the query-API authentication note (retired — see ADR-002 D6). An ADR is required before
   implementation begins.
 
 ## Open / blocked items
