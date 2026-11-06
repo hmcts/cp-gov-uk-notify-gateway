@@ -69,7 +69,7 @@ dependencies {
   implementation 'org.apache.tomcat.embed:tomcat-embed-core:11.0.27'
 
   // HTML-to-text of the Office 365 response's template body for the notification-sent event (legacy parity)
-  implementation 'org.jsoup:jsoup:1.23.2'
+  implementation 'org.jsoup:jsoup:1.24.1'
 
   // --- Persistence: JPA + Postgres + Flyway (NG-S01) ---
   implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
@@ -91,8 +91,8 @@ dependencies {
 
   // --- Azure integrations (NG-S02): ASB command consumer + Blob attachment download ---
   // Managed Identity in real envs (DefaultAzureCredential); connection-string only for emulator/local.
-  implementation 'com.azure:azure-messaging-servicebus:7.18.1'
-  implementation 'com.azure:azure-storage-blob:12.36.0'
+  implementation 'com.azure:azure-messaging-servicebus:7.19.1'
+  implementation 'com.azure:azure-storage-blob:12.37.1'
   implementation 'com.azure:azure-identity:1.19.0'
 
   // --- Integration testing: Postgres via Testcontainers ---
@@ -108,7 +108,7 @@ dependencies {
   // ASB emulator container needs an MSSQL backing store (see AbstractServiceBusIntegrationTest / README).
   testImplementation 'org.testcontainers:testcontainers-azure'
   testImplementation 'org.testcontainers:testcontainers-mssqlserver'
-  testRuntimeOnly 'com.microsoft.sqlserver:mssql-jdbc:13.6.1.jre11'
+  testRuntimeOnly 'com.microsoft.sqlserver:mssql-jdbc:13.6.2.jre11'
 
   // Gov.UK Notify HTTP boundary is stubbed with WireMock (standalone flavour = shaded Jetty, no clash
   // with the app's embedded Tomcat); Awaitility drives the async ASB/cp-task-manager assertions.
