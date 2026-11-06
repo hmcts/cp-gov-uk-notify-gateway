@@ -8,7 +8,10 @@ import uk.gov.hmcts.cp.notification.integration.repository.JobTestRepository;
 import uk.gov.hmcts.cp.notification.integration.repository.NotificationTestRepository;
 import uk.gov.hmcts.cp.notification.integration.stubs.support.WireMockSupport;
 
+import static uk.gov.hmcts.cp.notification.integration.stubs.ASBTestClient.anAsbTestClient;
 import static uk.gov.hmcts.cp.notification.integration.stubs.ResultQueueStubService.aResultQueue;
+import static uk.gov.hmcts.cp.notification.integration.stubs.support.ServiceBusContainerSupport.COMMAND_QUEUE;
+import static uk.gov.hmcts.cp.notification.integration.stubs.support.ServiceBusContainerSupport.LETTER_COMMAND_QUEUE;
 import static uk.gov.hmcts.cp.notification.integration.stubs.support.ServiceBusContainerSupport.RESULT_QUEUE;
 
 public class ScenarioResetHook {
@@ -23,6 +26,8 @@ public class ScenarioResetHook {
     public void resetStubs() {
         WireMockSupport.reset();
         aResultQueue(RESULT_QUEUE).drain();
+        anAsbTestClient(COMMAND_QUEUE).purgeDeadLetterQueue();
+        anAsbTestClient(LETTER_COMMAND_QUEUE).purgeDeadLetterQueue();
     }
 
     @After

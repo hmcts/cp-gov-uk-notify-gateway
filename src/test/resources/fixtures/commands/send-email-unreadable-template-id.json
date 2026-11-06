@@ -1,0 +1,5 @@
+{
+  "notificationId": "${notificationId}",
+  "templateId": "not-a-uuid",
+  "sendToAddress": "reports@example.com"
+}

@@ -21,21 +21,24 @@ The two framework swaps that drive most deviations:
 
 ## Deviation register
 
-| # | Area | Legacy | NG | Deliberate? |
-|---|------|--------|----|-------------|
-| [D1](#d1-send-email-ingress) | Send-email ingress | Synchronous REST command API | Asynchronous Service Bus queue `ng-send-email`; no business HTTP endpoints | Yes |
-| [D2](#d2-email-delivery-status-classification) | Email delivery-status classification | Fails only `technical-failure`, `permanent-failure`, `virus-scan-failed`; re-polls every other status until retries run out | Re-polls only in-flight statuses; every other status fails at once; poll `404` is permanent | Yes |
-| [D3](#d3-attachment-reference) | Attachment reference | `fileId` (file-service) or `materialUrl` | `fileUri` (direct Azure Blob URI) or `materialUrl` | Yes |
-| [D4](#d4-blob-host-allow-list) | Blob host allow-list | Blob endpoint pinned by config; no host check | `fileUri` host must be on a configured allow-list | Yes — new control |
-| [D5](#d5-govuk-notify-egress-proxy) | GOV.UK Notify egress proxy | Notify reached through the corporate proxy | Direct egress; proxy can be enabled per environment | Yes |
-| [D6](#d6-query-api-removed) | Query API removed | RAML query API over the view store | No query API; HTTP is actuator-only | Yes — removal |
-| [D7](#d7-materialurl-resolution) | materialUrl resolution | Fetches the link as given | Material host only; `localhost` links rewritten; anything else refused | Yes |
-| [D8](#d8-sas-document-download) | SAS document download | Opens any link Material returns, follows redirects | `https` Azure Blob links only, no redirects, no credentials, 15 MB cap | Yes — new control |
-| [D9](#d9-office-365-send) | Office 365 send | Unreadable `200`: unhandled exception, job re-runs every hour and **sends the email again** each time | Unreadable `200` = SENT; SENT recorded by a separate task; calls time out | Yes |
-| [D10](#d10-office-365-routing) | Office 365 routing | Office 365 for attachments over 2 MB **or** listed recipient domains | Office 365 for attachments over 2 MB only | Yes |
-| [D11](#d11-send-letter) | Send letter | REST command; any `letterUrl` host read; final validation failure has no `clientContext` | Service Bus queue `ng-send-letter`; Material links only; `clientContext` on every failure | Yes |
-| [D12](#d12-letter-status-polling) | Letter status polling | Fails only `technical-failure`, `permanent-failure`, `virus-scan-failed`; re-polls every other status | Re-polls only in-flight statuses; every other status fails at once | Yes |
-| [D13](#d13-result-events) | Result events | `public.notificationnotify.events.notification-sent` / `-failed`, published to the **public event topic** for any subscriber | `notification-sent` / `notification-failed`, sent to the requester's **`ReplyTo` queue** only | Yes |
+| # | Area | Legacy | NG | Deliberate? | Client impact |
+|---|------|--------|----|-------------|---------------|
+| [D1](#d1-send-email-ingress) | Send-email ingress | Synchronous REST command API | Asynchronous Service Bus queue `ng-send-email`; no business HTTP endpoints | Yes | Yes |
+| [D2](#d2-email-delivery-status-classification) | Email delivery-status classification | Fails only `technical-failure`, `permanent-failure`, `virus-scan-failed`; re-polls every other status until retries run out | Re-polls only in-flight statuses; every other status fails at once; poll `404` is permanent | Yes | No |
+| [D3](#d3-attachment-reference) | Attachment reference | `fileId` (file-service) or `materialUrl` | `fileUri` (direct Azure Blob URI) or `materialUrl` | Yes | Yes |
+| [D4](#d4-blob-host-allow-list) | Blob host allow-list | Blob endpoint pinned by config; no host check | `fileUri` host must be on a configured allow-list | Yes — new control | Yes |
+| [D5](#d5-govuk-notify-egress-proxy) | GOV.UK Notify egress proxy | Notify reached through the corporate proxy | Direct egress; proxy can be enabled per environment | Yes | No |
+| [D6](#d6-query-api-removed) | Query API removed | RAML query API over the view store | No query API; HTTP is actuator-only | Yes — removal | Yes |
+| [D7](#d7-materialurl-resolution) | materialUrl resolution | Fetches the link as given | Material host only; `localhost` links rewritten; anything else refused | Yes | No |
+| [D8](#d8-sas-document-download) | SAS document download | Opens any link Material returns, follows redirects | `https` Azure Blob links only, no redirects, no credentials, 15 MB cap | Yes — new control | No |
+| [D9](#d9-office-365-send) | Office 365 send | Unreadable `200`: unhandled exception, job re-runs every hour and **sends the email again** each time | Unreadable `200` = SENT; SENT recorded by a separate task; calls time out | Yes | No |
+| [D10](#d10-office-365-routing) | Office 365 routing | Office 365 for attachments over 2 MB **or** listed recipient domains | Office 365 for attachments over 2 MB only | Yes | No |
+| [D11](#d11-send-letter) | Send letter | REST command; any `letterUrl` host read; final validation failure has no `clientContext` | Service Bus queue `ng-send-letter`; Material links only; `clientContext` on every failure | Yes | Yes |
+| [D12](#d12-letter-status-polling) | Letter status polling | Fails only `technical-failure`, `permanent-failure`, `virus-scan-failed`; re-polls every other status | Re-polls only in-flight statuses; every other status fails at once | Yes | No |
+| [D13](#d13-result-events) | Result events | `public.notificationnotify.events.notification-sent` / `-failed`, published to the **public event topic** for any subscriber | `notification-sent` / `notification-failed`, sent to the requester's **`ReplyTo` queue** only | Yes | Yes |
+| [D14](#d14-request-validation-rejection) | Request validation rejection | Invalid request rejected synchronously by the REST command API with `400`; nothing queued | Request that cannot be read or fails validation answered with a **`notification-validation-failed`** event to `ReplyTo`; a message **without a `ReplyTo`** dead-lettered | Yes — consequence of D1 | Yes |
+
+**Client impact** is **Yes** when a calling context must change its integration (transport, queue, field name or meaning, permissions, result-event name or delivery); **No** when the difference is internal to NG and the request and result contract are unchanged. What each client must do: [NG client onboarding](../../client-onboarding.md).
 
 Not deviations (legacy parity is kept, only the implementation differs): retry exhaustion
 ([Retry exhaustion implementation](#retry-exhaustion-implementation)), the Material document upload
@@ -191,13 +194,44 @@ Polls use `letter-status-durations-secs` then `letter-accepted-status-durations-
 
 | | Legacy | NG |
 |---|--------|----|
-| Event names | `public.notificationnotify.events.notification-sent`, `public.notificationnotify.events.notification-failed` | `notification-sent`, `notification-failed` |
+| Event names | `public.notificationnotify.events.notification-sent`, `public.notificationnotify.events.notification-failed` | `notification-sent`, `notification-failed`; plus the NG-only `notification-validation-failed` (D14) |
 | Where they go | **public event topic** (`public.event` on Artemis, via `NotificationNotifyPublicEventProcessor`); every subscribing context receives them | the Service Bus queue named in the request's **`ReplyTo`**; only the requester receives them |
 | Where the name is | JSON envelope metadata (`name`) | Service Bus message `subject` |
 | Payload | `notification-sent` / `notification-failed` fields | unchanged |
 
 - **Why / risk:** the `public.<context>.events.` prefix marks a CQRS framework event published to the shared public topic. NG sends point-to-point to the requester, so the prefix no longer means anything. Each consumer must read its own reply queue and route on the bare `subject`; a handler for the legacy name (e.g. staging-dvla's `@Handles("public.notificationnotify.events.notification-sent")`) will not receive NG's events. Legacy's other public events (`email-notification-bounced`, `poca-email-notification-received`) are not raised.
 - **References:** `result/NotificationSentEvent.java`, `result/NotificationFailedEvent.java`, `result/ResultEventPublisher.java`, `contracts/notification-{sent,failed}.schema.json`; legacy `NotificationNotifyPublicEventProcessor`, `public-publications-descriptor.yaml`.
+
+
+### D14. Request validation rejection
+
+The only behaviour change from moving ingress from REST to Service Bus (D1, D11) is **how a bad request is answered**. Every failure after the request is accepted already ended asynchronously in legacy, and still does.
+
+| Failure | Legacy | NG | Changed? |
+|---------|--------|----|----------|
+| No `ReplyTo` on the message (null or blank) | n/a — REST answers the caller directly | message **dead-lettered** on `ng-send-email` / `ng-send-letter` before it is read, with reason `MissingReplyTo`; nothing sent, nothing recorded, no result event | **yes** |
+| Required field missing or invalid (`notificationId`, `templateId`, `sendToAddress`; `letterUrl` for letters; `replyToAddress` not an email) | **`400`** to the caller | **`notification-validation-failed`** event to `ReplyTo`, message completed; nothing sent, nothing recorded | **yes** |
+| Body not valid JSON, or a field of the wrong type (e.g. `notificationId` not a UUID) | **`400`** to the caller | **`notification-validation-failed`** event to `ReplyTo`, message completed; nothing sent, nothing recorded | **yes** |
+| Transient failure accepting the request (e.g. database unavailable), or sending `notification-validation-failed` | `5xx` to the caller, or the JMS handler retries and then dead-letters on Artemis | message **abandoned** and redelivered by Service Bus; dead-lettered once the queue's max delivery count is reached | no — async in both |
+| Send or status-poll failure after acceptance (Notify, Office 365, Material, blob) | job retried, then `notification-failed` on the public topic (or Artemis DLQ for unhandled errors) | job retried, then `notification-failed` to `ReplyTo` (D13) | no |
+| Duplicate `notificationId` | ignored, no second send | ignored, no second send | no |
+
+`notification-validation-failed` is NG-only; legacy has no equivalent event. It is sent to the `ReplyTo` queue with Service Bus `subject` `notification-validation-failed` and this body:
+
+```json
+{
+  "reason": "PAYLOAD_VALIDATION_FAILED",
+  "details": "sendToAddress: must not be blank",
+  "originalEventPayload": "{\"notificationId\":\"…\",\"templateId\":\"…\"}"
+}
+```
+
+- `reason` is always `PAYLOAD_VALIDATION_FAILED`.
+- `details` uses the Jakarta Bean Validation `ConstraintViolationException` form `field: message`. For a payload that was read but is invalid it lists every violation, comma-separated and sorted by field. For a payload that could not be read it is the JSON parser's message, prefixed with the field when the parser names one (e.g. `templateId: Cannot deserialize value of type java.util.UUID …`).
+- `originalEventPayload` is the command body exactly as received, as a JSON string. The request was not accepted, so there is no `notificationId` of NG's to correlate on; the caller reads its own from this payload.
+
+- **Why / risk:** a queue has no synchronous response, so the `400` becomes an event on the caller's reply queue, for a payload NG cannot read as well as one that fails validation. That needs the reply queue, so `ReplyTo` is now required: a message without one is dead-lettered before it is read, because neither a rejection nor a delivery outcome could be returned (before this change such a message was processed and its results dropped silently). Rejection runs entirely before ingestion, so a rejected command never opens a database transaction: the `ReplyTo` check, parsing and validation happen in the consumer, and the first database access is `NotificationIngestionService.ingest` (`@Transactional`), reached only by a valid command. If the event cannot be sent, the message is abandoned like any other transient failure: Service Bus redelivers it and dead-letters it at the queue's max delivery count, so no separate in-process retry is needed. A dead-lettered command can be told apart by its reason: `MissingReplyTo` (set by NG) or `MaxDeliveryCountExceeded` (set by Service Bus). Callers should still validate against `command-send-*-notification.schema.json` before sending, and the DLQ count of `ng-send-email` / `ng-send-letter` must be watched.
+- **References:** `messaging/SendEmailConsumer.java`, `messaging/SendLetterConsumer.java`, `messaging/CommandMessageProcessor.java`, `messaging/ValidationFailureNotifier.java`, `result/NotificationValidationFailedEvent.java`, `contracts/notification-validation-failed.schema.json`, `contracts/command-send-email-notification.schema.json`, `contracts/command-send-letter-notification.schema.json`; legacy `notificationnotify-command-api.raml`.
 
 ## Material and SAS failure classification
 
@@ -373,6 +407,11 @@ opt-in fallback:
   fire-and-forget model and read the outcome from the result events (there is no query API — D6).
 - **D13** changes the result-event names and delivery: consumers read `notification-sent` /
   `notification-failed` from their own `ReplyTo` queue, not `public.notificationnotify.events.*` from the topic.
+- **D14** follows from D1: an unreadable or invalid request is answered with a `notification-validation-failed`
+  event on `ReplyTo` instead of a `400`; nothing is recorded. `ReplyTo` is mandatory; a message without one
+  is dead-lettered (reason `MissingReplyTo`), and one whose event cannot be sent is redelivered until the
+  queue's max delivery count dead-letters it. Callers handle the new event and
+  alert on the command queues' DLQ count.
 - **D7 and D8** are deliberate: the Material path reaches the same outcome as legacy (the Material document
   attached to the email) without the WildFly-only `localhost` route, without sending the system user or the
   gateway's identity anywhere but Material, and without following the SAS link off Azure Blob Storage.

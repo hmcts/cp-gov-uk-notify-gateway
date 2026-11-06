@@ -3,7 +3,6 @@ package uk.gov.hmcts.cp.notification.integration.stubs;
 import com.azure.messaging.servicebus.ServiceBusReceivedMessage;
 
 import java.time.Duration;
-import java.util.UUID;
 
 import uk.gov.hmcts.cp.notification.integration.stubs.support.ContractSchema;
 
@@ -49,6 +48,16 @@ public final class ResultQueueStubService {
         return this;
     }
 
+    public ResultQueueStubService withTextField(final String jsonPath, final String expectedText) {
+        assertThatJson(body()).node(jsonPath).isString().isEqualTo(expectedText);
+        return this;
+    }
+
+    public ResultQueueStubService withNonBlankTextField(final String jsonPath) {
+        assertThatJson(body()).node(jsonPath).isString().isNotBlank();
+        return this;
+    }
+
     public ResultQueueStubService withFieldPresent(final String jsonPath) {
         assertThatJson(body()).node(jsonPath).isPresent();
         return this;
@@ -68,16 +77,6 @@ public final class ResultQueueStubService {
         while (queue.receiveMessage(Duration.ofMillis(500)) != null) {
             // discard any residual events left by a previous scenario
         }
-    }
-
-    public void receivesNoResultEvent() {
-        final String tracer = "tracer-" + UUID.randomUUID();
-        queue.send(tracer);
-        final ServiceBusReceivedMessage first = queue.receiveMessage(RECEIVE_TIMEOUT);
-        assertThat(first).as("the tracer just enqueued must come back").isNotNull();
-        assertThat(first.getBody().toString())
-                .as("the reply queue holds only the tracer — no result event was published ahead of it")
-                .isEqualTo(tracer);
     }
 
     public String body() {

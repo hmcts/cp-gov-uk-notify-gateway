@@ -2,67 +2,28 @@ package uk.gov.hmcts.cp.notification.messaging;
 
 import com.azure.messaging.servicebus.ServiceBusErrorContext;
 import com.azure.messaging.servicebus.ServiceBusReceivedMessageContext;
-import jakarta.validation.ConstraintViolation;
-import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.ObjectMapper;
 
 import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
 import uk.gov.hmcts.cp.notification.service.NotificationIngestionService;
 
-import java.util.Set;
-
+/**
+ * Consumes send-email-notification commands from the email command queue; how each message is settled is
+ * {@link CommandMessageProcessor}'s job.
+ */
 @Component
 @RequiredArgsConstructor
 public class SendEmailConsumer {
     private static final Logger LOG = LoggerFactory.getLogger(SendEmailConsumer.class);
 
-    private final ObjectMapper objectMapper;
-    private final Validator validator;
+    private final CommandMessageProcessor processor;
     private final NotificationIngestionService ingestionService;
 
     public void processMessage(final ServiceBusReceivedMessageContext context) {
-        final String messageId = context.getMessage().getMessageId();
-        final String body = context.getMessage().getBody().toString();
-
-        final SendEmailCommand command = deserialise(body, messageId, context);
-        if (command != null) {
-            final Set<ConstraintViolation<SendEmailCommand>> violations = validator.validate(command);
-            if (violations.isEmpty()) {
-                ingest(command, context, messageId);
-            } else {
-                LOG.warn("Dead-lettering invalid message {}: {}", messageId, violations);
-                context.deadLetter();
-            }
-        }
-    }
-
-    private SendEmailCommand deserialise(
-            final String body, final String messageId, final ServiceBusReceivedMessageContext context) {
-        SendEmailCommand command = null;
-        try {
-            command = objectMapper.readValue(body, SendEmailCommand.class);
-        } catch (final JacksonException e) {
-            LOG.warn("Dead-lettering unparseable message {} (cause: {})", messageId, e.getClass().getSimpleName());
-            context.deadLetter();
-        }
-        return command;
-    }
-
-    @SuppressWarnings("PMD.AvoidCatchingGenericException")
-    private void ingest(
-            final SendEmailCommand command, final ServiceBusReceivedMessageContext context, final String messageId) {
-        try {
-            ingestionService.ingest(command, context.getMessage().getReplyTo());
-            context.complete();
-        } catch (final Exception e) {
-            LOG.error("Transient failure processing message {} — abandoning for redelivery", messageId, e);
-            context.abandon();
-        }
+        processor.process(context, SendEmailCommand.class, ingestionService::ingest);
     }
 
     public void processError(final ServiceBusErrorContext context) {

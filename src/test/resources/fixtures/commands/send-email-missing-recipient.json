@@ -1,0 +1,7 @@
+{
+  "notificationId": "${notificationId}",
+  "templateId": "${templateId}",
+  "personalisation": {
+    "recipient_name": "Alex Morgan"
+  }
+}

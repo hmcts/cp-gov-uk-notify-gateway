@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public final class ContractSchema {
     public static final String NOTIFICATION_SENT = "notification-sent.schema.json";
     public static final String NOTIFICATION_FAILED = "notification-failed.schema.json";
+    public static final String NOTIFICATION_VALIDATION_FAILED = "notification-validation-failed.schema.json";
     public static final String SEND_EMAIL_COMMAND = "command-send-email-notification.schema.json";
     public static final String SEND_LETTER_COMMAND = "command-send-letter-notification.schema.json";
 

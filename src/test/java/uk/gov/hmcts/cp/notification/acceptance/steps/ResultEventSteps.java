@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import static uk.gov.hmcts.cp.notification.integration.stubs.ResultQueueStubService.aResultQueue;
 import static uk.gov.hmcts.cp.notification.integration.stubs.support.ContractSchema.NOTIFICATION_FAILED;
 import static uk.gov.hmcts.cp.notification.integration.stubs.support.ContractSchema.NOTIFICATION_SENT;
+import static uk.gov.hmcts.cp.notification.integration.stubs.support.ContractSchema.NOTIFICATION_VALIDATION_FAILED;
 import static uk.gov.hmcts.cp.notification.integration.stubs.support.ServiceBusContainerSupport.RESULT_QUEUE;
 
 public class ResultEventSteps {
@@ -105,8 +106,25 @@ public class ResultEventSteps {
                 .withField("statusCode", status);
     }
 
-    @Then("no result event is published")
-    public void no_result_event_is_published() {
-        aResultQueue(RESULT_QUEUE).receivesNoResultEvent();
+    @Then("a notification-validation-failed result event explaining why the command could not be read is published to the originator's reply queue")
+    public void a_notification_validation_failed_result_event_for_an_unreadable_command_is_published() {
+        aResultQueue(RESULT_QUEUE)
+                .receivesResultEvent()
+                .withSubject("notification-validation-failed")
+                .withField("reason", "PAYLOAD_VALIDATION_FAILED")
+                .withNonBlankTextField("details")
+                .withTextField("originalEventPayload", context.getCommandJson())
+                .conformsTo(NOTIFICATION_VALIDATION_FAILED);
+    }
+
+    @Then("a notification-validation-failed result event saying {string} is published to the originator's reply queue")
+    public void a_notification_validation_failed_result_event_is_published_to_the_reply_queue(final String details) {
+        aResultQueue(RESULT_QUEUE)
+                .receivesResultEvent()
+                .withSubject("notification-validation-failed")
+                .withField("reason", "PAYLOAD_VALIDATION_FAILED")
+                .withField("details", details)
+                .withTextField("originalEventPayload", context.getCommandJson())
+                .conformsTo(NOTIFICATION_VALIDATION_FAILED);
     }
 }

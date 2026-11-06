@@ -8,14 +8,18 @@ Feature: Email notification delivery
   the attachment is larger than Gov.UK Notify accepts, the email is sent through Office 365 instead. When
   the attachment cannot be retrieved, the gateway fails the notification rather
   than sending a broken email; a Material document that is only briefly
-  unavailable is retried, and the notification fails only once retries run out. When the originating context provides a reply
-  queue the gateway returns the delivery outcome to it as a result event; when
-  no reply queue is provided the send completes silently.
+  unavailable is retried, and the notification fails only once retries run out. The originating context names a reply
+  queue on every command and the gateway returns the outcome to it as a result
+  event. A command that cannot be read or fails validation is rejected and the
+  reason returned to the originator; a command without a reply queue is set aside unprocessed,
+  because its outcome could not be returned.
+
+  Background:
+    Given the originator provides a reply queue
 
   @smoke
   Scenario: A delivered notification is recorded as sent and its outcome returned to the originator
     Given a send-email-notification command for a recipient with an attachment
-    And the originator provides a reply queue
     When the gateway processes the command
     Then the email is sent via the Gov.UK Notify provider
     And the delivery status is polled from the provider
@@ -24,7 +28,6 @@ Feature: Email notification delivery
 
   Scenario: A notification with an unretrievable attachment is failed, no email is sent, and the failure returned to the originator
     Given a send-email-notification command whose attachment is missing
-    And the originator provides a reply queue
     When the gateway processes the command
     Then the notification is recorded as FAILED
     And no email is sent via the Gov.UK Notify provider
@@ -33,22 +36,36 @@ Feature: Email notification delivery
   Scenario: A notification the provider reports as permanently failed is recorded as failed and the outcome returned to the originator
     Given a send-email-notification command for a recipient with an attachment
     And the provider reports the delivery as permanently failed
-    And the originator provides a reply queue
     When the gateway processes the command
     Then the email is sent via the Gov.UK Notify provider
     And the notification is recorded as FAILED
     And a notification-failed result event is published to the originator's reply queue
 
-  Scenario: A notification with no reply queue completes silently with no result event
-    Given a send-email-notification command for a recipient with an attachment
+  Scenario: A notification command that fails validation is rejected and the reason returned to the originator
+    Given a send-email-notification command with no recipient address
     When the gateway processes the command
-    Then the notification is recorded as SENT
-    And no result event is published
+    Then a notification-validation-failed result event saying "sendToAddress: must not be blank" is published to the originator's reply queue
+    And no notification is recorded
+    And no email is sent via the Gov.UK Notify provider
+
+  Scenario: A notification command that cannot be read is rejected and the reason returned to the originator
+    Given a send-email-notification command whose template id cannot be read
+    When the gateway processes the command
+    Then a notification-validation-failed result event explaining why the command could not be read is published to the originator's reply queue
+    And no notification is recorded
+    And no email is sent via the Gov.UK Notify provider
+
+  Scenario: A notification with no reply queue is set aside unprocessed
+    Given a send-email-notification command for a recipient with an attachment
+    And the originator provides no reply queue
+    When the gateway processes the command
+    Then the command is set aside for investigation
+    And no notification is recorded
+    And no email is sent via the Gov.UK Notify provider
 
   @smoke
   Scenario: A notification with a Material document link is delivered with the document attached and its outcome returned to the originator
     Given a send-email-notification command for a recipient with a Material document link
-    And the originator provides a reply queue
     When the gateway processes the command
     Then the document is fetched from the Material service on behalf of the notification
     And the email is sent via the Gov.UK Notify provider with the Material document attached
@@ -59,7 +76,6 @@ Feature: Email notification delivery
   @regression
   Scenario: A notification whose Material document is larger than Gov.UK Notify accepts is sent via Office 365 and its outcome returned to the originator
     Given a send-email-notification command for a recipient with a Material document larger than Gov.UK Notify accepts
-    And the originator provides a reply queue
     When the gateway processes the command
     Then the email is sent via the Office 365 provider with the Material document attached
     And no email is sent via the Gov.UK Notify provider
@@ -84,7 +100,6 @@ Feature: Email notification delivery
   @regression
   Scenario Outline: A Material attachment that cannot be sent is failed, no email is sent, and the failure returned to the originator
     Given a send-email-notification command for a recipient with <material problem>
-    And the originator provides a reply queue
     When the gateway processes the command
     Then the notification is recorded as FAILED
     And no email is sent via the Gov.UK Notify provider
@@ -106,7 +121,6 @@ Feature: Email notification delivery
   @regression
   Scenario: A Material document the gateway is not allowed to fetch is failed once retries run out
     Given a send-email-notification command for a recipient with a Material document the gateway is not allowed to fetch
-    And the originator provides a reply queue
     When the gateway processes the command
     Then the notification is recorded as FAILED
     And the Material service is asked for the document again on each retry

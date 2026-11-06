@@ -15,8 +15,10 @@ behalf of CPP contexts. It is the re-platform of the legacy WildFly `cpp-context
   service by `materialUrl` (credential-less download of the SAS link Material returns; ADR-002 D7/D8).
 - **Persists** each notification (Postgres/Flyway) and runs send/retry/status-polling on
   **cp-task-manager**.
-- **Publishes the outcome** (sent / failed / bounced) to the queue named in the inbound message's
-  `ReplyTo` property — per-originator, and only when `ReplyTo` is present (otherwise fire-and-forget).
+- **Publishes the outcome** (`notification-sent` / `notification-failed`) to the queue named in the
+  inbound message's `ReplyTo` property — per-originator. `ReplyTo` is **required**: a command without one
+  is dead-lettered unprocessed. A command that cannot be read or fails payload validation is answered with a
+  `notification-validation-failed` event on `ReplyTo` instead (ADR-002 D14).
 - **Serves no business HTTP API** — only the actuator health, info and Prometheus endpoints are
   reachable over HTTP; every other path is refused (ADR-002 D6).
 
