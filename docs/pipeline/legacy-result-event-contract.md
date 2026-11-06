@@ -68,3 +68,6 @@ present**. The internal event's `failedTask` field is deliberately **dropped**. 
    `notificationType`). Any addition breaks parity.
 4. **mi-reportdata MVP publishes neither.** No `ReplyTo` → no event. Exercised only via a synthetic
    `ReplyTo`-bearing message in tests until a real originator opts in.
+   *Superseded by FR-025 / ADR-002 D14 (PEG-3697): `ReplyTo` is now required on every command, and a
+   command without it is dead-lettered unprocessed. The NG-only `notification-validation-failed` event
+   is outside this golden-master contract.*

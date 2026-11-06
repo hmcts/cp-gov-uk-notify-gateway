@@ -8,6 +8,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import uk.gov.hmcts.cp.notification.integration.config.AsbConsumerSliceConfig;
 import uk.gov.hmcts.cp.notification.integration.stubs.support.ServiceBusContainerSupport;
+import uk.gov.hmcts.cp.notification.messaging.ValidationFailureNotifier;
 import uk.gov.hmcts.cp.notification.service.NotificationIngestionService;
 
 /**
@@ -26,4 +27,7 @@ public abstract class AbstractAsbConsumerSliceTest {
 
     @MockitoBean
     protected NotificationIngestionService ingestionService;
+
+    @MockitoBean
+    protected ValidationFailureNotifier validationFailureNotifier;
 }

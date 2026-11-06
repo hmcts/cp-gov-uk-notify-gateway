@@ -39,6 +39,11 @@ public class NotificationDatabaseSteps {
                 }));
     }
 
+    @Then("no notification is recorded")
+    public void no_notification_is_recorded() {
+        assertThat(notifications.findById(fromString(context.getNotificationId()))).isEmpty();
+    }
+
     @Then("the notification is recorded as {word}")
     public void the_notification_is_recorded_as(final String status) {
         final String notificationId = context.getNotificationId();

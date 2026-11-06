@@ -6,12 +6,13 @@ import org.springframework.boot.validation.autoconfigure.ValidationAutoConfigura
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 
+import uk.gov.hmcts.cp.notification.messaging.CommandMessageProcessor;
 import uk.gov.hmcts.cp.notification.messaging.SendEmailConsumer;
 import uk.gov.hmcts.cp.notification.messaging.SendLetterConsumer;
 import uk.gov.hmcts.cp.notification.messaging.ServiceBusConfig;
 
 @Configuration
-@Import({ServiceBusConfig.class, SendEmailConsumer.class, SendLetterConsumer.class})
+@Import({ServiceBusConfig.class, CommandMessageProcessor.class, SendEmailConsumer.class, SendLetterConsumer.class})
 @ImportAutoConfiguration({JacksonAutoConfiguration.class, ValidationAutoConfiguration.class})
 public class AsbConsumerSliceConfig {
 }

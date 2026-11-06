@@ -59,6 +59,7 @@ identity/RBAC, provisioning, deploy — NG-S05/07/08/09) carry no behavioural-pa
 | FR-022 | At-least-once safety: state guard + Gov.Notify recover-by-reference | [NG-S12](./NG-S12.md) | AC-035, AC-036 | Distinct from FR-020 — prevents *double-acting* on retries |
 | FR-023 | Observability: logs, metrics, DLQ-depth | [NG-S13](./NG-S13.md) | AC-037, AC-038 | |
 | FR-024 | Secure query API with IDAM auth | [NG-S14](./NG-S14.md) | AC-039 | **Superseded by ADR-002 D6 (query API removed).** Sliced out of NG-S04 — auth pattern was an open ADR (Pattern 1 vs Pattern 2; query-API authentication note retired — see ADR-002 D6) |
+| FR-025 | Reject unusable commands: `ReplyTo` required, `notification-validation-failed` on unreadable/invalid commands | [NG-S15](./NG-S15.md) | AC-042, AC-043, AC-044, AC-045, AC-046 | PEG-3697; ADR-002 D14. Supersedes AC-015 and part of AC-032 |
 
 **Coverage check:** every FR-001…FR-024 (FR-021 removed by Stage 2) lands in exactly one story.
 Every AC-001…AC-039 in `requirements.md` (AC-034 does not exist — no FR/AC gap, just an unused number)
@@ -85,6 +86,7 @@ orphan either FR or AC.
 | [NG-S12](./NG-S12.md) | At-least-once safety: state guard + recover-by-reference | FR-022 | **[PEG-3388](https://tools.hmcts.net/jira/browse/PEG-3388)** (created) |
 | [NG-S13](./NG-S13.md) | Observability: logs, metrics, DLQ-depth | FR-023 | **[PEG-3389](https://tools.hmcts.net/jira/browse/PEG-3389)** (created) |
 | [NG-S14](./NG-S14.md) | Authentication & authorisation of the notification query API | FR-024 | **[PEG-3410](https://tools.hmcts.net/jira/browse/PEG-3410)** (created; relates to PEG-3383) |
+| [NG-S15](./NG-S15.md) | Reject unusable commands without recording them | FR-025 | **[PEG-3697](https://tools.hmcts.net/jira/browse/PEG-3697)** |
 
 Note on FR-010: the integration-test-harness FR has no dedicated story in this backlog — per the
 coordinator's Q1 decision its scenarios are folded into the DoD of NG-S02, NG-S03, NG-S10, NG-S11,
@@ -141,6 +143,7 @@ Inputs the test-engineer stage must read (explicit paths — Stage 4 reads only 
 - `docs/pipeline/user-stories/NG-S12.md`
 - `docs/pipeline/user-stories/NG-S13.md`
 - `docs/pipeline/user-stories/NG-S14.md`
+- `docs/pipeline/user-stories/NG-S15.md`
 - `docs/pipeline/requirements.md` (governing FRs/ACs/NFRs, referenced by ID from the stories above)
 - `docs/pipeline/legacy-result-event-contract.md` (golden-master detail underlying NG-S03's ACs)
 

@@ -1,16 +1,20 @@
 package uk.gov.hmcts.cp.notification.acceptance.steps;
 
 import io.cucumber.java.en.Given;
+import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 
+import uk.gov.hmcts.cp.notification.integration.stubs.ASBTestClient;
 import uk.gov.hmcts.cp.notification.integration.stubs.GovUkNotifyStubService;
 import uk.gov.hmcts.cp.notification.integration.stubs.MaterialServiceStub;
 import uk.gov.hmcts.cp.notification.integration.stubs.Office365StubService;
 
+import static java.time.Duration.ofSeconds;
 import static java.util.Map.of;
 import static java.util.UUID.randomUUID;
+import static org.awaitility.Awaitility.await;
 import static uk.gov.hmcts.cp.notification.integration.Fixtures.load;
 import static uk.gov.hmcts.cp.notification.integration.Fixtures.loadBytes;
 import static uk.gov.hmcts.cp.notification.integration.stubs.ASBTestClient.anAsbTestClient;
@@ -164,6 +168,11 @@ public class CommandSteps {
         context.setReplyQueue(RESULT_QUEUE);
     }
 
+    @Given("the originator provides no reply queue")
+    public void the_originator_provides_no_reply_queue() {
+        context.setReplyQueue(null);
+    }
+
     @Given("a send-letter-notification command for a letter held by the Material service")
     public void a_send_letter_notification_command_for_a_letter_held_by_the_material_service() {
         aLetterCommand("fixtures/commands/send-letter.json", false);
@@ -187,9 +196,50 @@ public class CommandSteps {
                 context.getMaterialId(), LETTER_FILENAME, context.getAttachmentBytes());
     }
 
+    @Given("a send-email-notification command with no recipient address")
+    public void a_send_email_notification_command_with_no_recipient_address() {
+        final String notificationId = randomUUID().toString();
+        context.setNotificationId(notificationId);
+        context.setCommandJson(load("fixtures/commands/send-email-missing-recipient.json", of(
+                "notificationId", notificationId,
+                "templateId", randomUUID().toString())));
+    }
+
+    @Given("a send-letter-notification command with no letter link")
+    public void a_send_letter_notification_command_with_no_letter_link() {
+        final String notificationId = randomUUID().toString();
+        context.setCommandQueue(LETTER_COMMAND_QUEUE);
+        context.setNotificationId(notificationId);
+        context.setCommandJson(load("fixtures/commands/send-letter-missing-letter-url.json", of(
+                "notificationId", notificationId)));
+    }
+
+    @Given("a send-email-notification command whose template id cannot be read")
+    public void a_send_email_notification_command_whose_template_id_cannot_be_read() {
+        final String notificationId = randomUUID().toString();
+        context.setNotificationId(notificationId);
+        context.setCommandJson(load("fixtures/commands/send-email-unreadable-template-id.json", of(
+                "notificationId", notificationId)));
+    }
+
+    @Given("a send-letter-notification command that is not valid JSON")
+    public void a_send_letter_notification_command_that_is_not_valid_json() {
+        final String notificationId = randomUUID().toString();
+        context.setCommandQueue(LETTER_COMMAND_QUEUE);
+        context.setNotificationId(notificationId);
+        context.setCommandJson(load("fixtures/commands/send-letter-malformed.json", of(
+                "notificationId", notificationId)));
+    }
+
     @When("the gateway processes the command")
     public void the_gateway_processes_the_command() {
         anAsbTestClient(context.getCommandQueue()).sendToCommandQueue(context.getCommandJson(), context.getReplyQueue());
+    }
+
+    @Then("the command is set aside for investigation")
+    public void the_command_is_set_aside_for_investigation() {
+        final ASBTestClient commandQueue = anAsbTestClient(context.getCommandQueue());
+        await().atMost(ofSeconds(60)).until(() -> commandQueue.peekDeadLetter() != null);
     }
 
     private void aLetterCommand(final String commandFixture, final boolean firstClass) {

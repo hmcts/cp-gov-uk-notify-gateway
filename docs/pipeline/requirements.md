@@ -37,6 +37,7 @@ upstream dependency.
 - Provide a read (query) REST API that returns all columns of the `notification` table.
 - Optionally publish a terminal result event to the inbound message's `ReplyTo` queue, gated on
   `ReplyTo` presence; for the mi-reportdata MVP this is fire-and-forget (no `ReplyTo`).
+  **Superseded by FR-025 / ADR-002 D14 (PEG-3697):** `ReplyTo` is now required; a command without it is dead-lettered unprocessed.
 - Prove the slice end-to-end for mi-reportdata email in STE, and harden it (failure/DLQ handling,
   observability, secured query API) without regressing the preserved result-event contract.
 
@@ -44,7 +45,7 @@ upstream dependency.
 
 | Actor | Description |
 |-------|-------------|
-| `cpp-context-mi-reportdata` (producer) | MVP first client. Uploads an NCES report CSV to its own Azure Blob container, then publishes a fire-and-forget `send-email-notification` command (with `fileUri`, `notificationId` = fresh UUID, **no** `ReplyTo`) to the ASB command queue. Producer-side changes are a dependency, not in scope. |
+| `cpp-context-mi-reportdata` (producer) | MVP first client. Uploads an NCES report CSV to its own Azure Blob container, then publishes a fire-and-forget `send-email-notification` command (with `fileUri`, `notificationId` = fresh UUID, **no** `ReplyTo`) to the ASB command queue. *(Superseded by FR-025: the producer must now set `ReplyTo`.)* Producer-side changes are a dependency, not in scope. |
 | Future originator contexts | Other CPP contexts (e.g. correspondence, progression, resulting, subscriptions, sjp) that will later send commands and opt in to result events purely by setting `ReplyTo`. Not implemented in these epics; shape must not preclude them. |
 | Gov.UK Notify | External provider for standard emails (and later letters). Called to send and polled for delivery status. |
 | Microsoft Office 365 (via Azure APIM) | External provider used when the recipient domain is `cjsm.net` (configurable) or the attachment is > 2MB; O365 responses are treated as immediately DELIVERED (no polling). |
@@ -67,7 +68,7 @@ upstream dependency.
 
 Scaffold the service and deliver one complete send: ASB command in → dedupe/INSERT → cp-task-manager
 `send-email` (+ `check-email-status`) → Azure Blob download → **Gov.UK Notify** → row `SENT`, with the
-`ReplyTo`-gated result-publish path implemented (a no-op for the fire-and-forget mi-reportdata MVP).
+`ReplyTo`-gated result-publish path implemented (a no-op for the fire-and-forget mi-reportdata MVP; superseded by FR-025, which makes `ReplyTo` required).
 Runs on the local emulator/Testcontainers stack. The ASB client is built on `DefaultAzureCredential`
 from the outset (emulator connection string locally); the production **RBAC grants land in Milestone 5
 (FR-013)**. **O365 routing is excluded** (Milestone 6) — until then a > 2 MB attachment cannot be
@@ -81,7 +82,7 @@ routed; see the note under Milestone 6.
 | FR-004 | In the `send-email` task, **download the attachment from Azure Blob Storage by `fileUri`** using `azure-storage-blob` + Workload Identity (Storage Blob Data Reader, including cross-context read of mi-reportdata's container); a blob 403/404 must mark the notification failed (no infinite retry). | Must | • **svc**<br>• blob download (BYO filestore) ← `cpp-context-reference-data` (UC1) | PEG-3355 |
 | FR-005 | Gov.UK Notify path: on a successful send, schedule a `check-email-status` cp-task-manager task (storing the Gov.Notify external reference id); poll status and on `DELIVERED` call `markSent()`. | Must | • **svc**<br>• Gov.Notify sender + status-poll logic to port ← (legacy)<br>• retry/poll pattern ← `service-cp-crime-hearing-results-document-subscription` | PEG-3356 |
 | FR-006 | Run all async scheduling, retry/backoff, and status-polling through **cp-task-manager**, preserving the legacy retry-duration lists verbatim (email retry durations `60,300,1800,3600,7200,14400`, and the other lists for letters when in scope). The lists MUST be **externalised to configuration** (a property, default = the legacy values), overridable per environment without a redeploy — preserving the legacy `@GlobalValue` tunability (`notify.email.retry.threshold.durations`), not hard-coded constants. | Must | • **svc**<br>• async engine (library + example) ← `cp-task-manager`<br>• retry-duration lists ← (legacy) | PEG-3357 |
-| FR-007 | Implement the **full result-publish path**: build the terminal result event and send it to the per-originator queue named by the inbound message's ASB `ReplyTo` property. Because the terminal event is emitted by a **later task execution** than ingest, `ReplyTo` is **captured at ingest into the `notification.result_queue` column** (not threaded through `job_data`, not re-read from the message) and **read back at the terminal hop** — where the row is already loaded for the state-transition guard. **Publish only when `result_queue` is present**; when absent (the mi-reportdata MVP case), complete the send silently with no result published. | Must | • **svc**<br>• ASB sender pattern ← `service-cp-crime-hearing-results-document-subscription` | PEG-3358 |
+| FR-007 | Implement the **full result-publish path**: build the terminal result event and send it to the per-originator queue named by the inbound message's ASB `ReplyTo` property. Because the terminal event is emitted by a **later task execution** than ingest, `ReplyTo` is **captured at ingest into the `notification.result_queue` column** (not threaded through `job_data`, not re-read from the message) and **read back at the terminal hop** — where the row is already loaded for the state-transition guard. **Publish only when `result_queue` is present**; when absent (the mi-reportdata MVP case), complete the send silently with no result published.  **Superseded by FR-025 / ADR-002 D14 (PEG-3697):** `ReplyTo` is now required; a command without it is dead-lettered unprocessed. | Must | • **svc**<br>• ASB sender pattern ← `service-cp-crime-hearing-results-document-subscription` | PEG-3358 |
 | FR-008 | **Preserve the result events' payloads** as the contract, now queue-routed to `ReplyTo` rather than broadcast to a topic (validated by golden-master parity against the legacy service). The event names drop the legacy `public.notificationnotify.events.` prefix (ADR-002 D13). **In MVP scope only `notification-sent` and `notification-failed` apply**; the other two legacy events (`…email-notification-bounced`, `…poca-email-notification-received`) belong to the **out-of-scope** bounce/POCA flows and are preserved when those land. | Must | • **svc**<br>• result-event names/payloads (golden-master) ← (legacy) | PEG-3359 |
 | FR-009 | Provide a **read (query) REST API** that returns **all columns** of the `notification` table (single-notification lookup and search). Reads only — the "no REST" rule applies solely to the command path. (Authentication ships in the MVP — see FR-024, pulled forward per Q3; the read API is never exposed unauthenticated.) | Must | • **svc**<br>• REST / JPA pattern ← `cp-court-list-publishing-service`<br>• query reference ← (legacy) | PEG-3360 |
 
@@ -133,6 +134,7 @@ routed; see the note under Milestone 6.
 | FR-022 | Ensure at-least-once safety: cp-task-manager task re-runs and ASB redelivery must not double-act — **guard every result-event publish on a real state transition** (QUEUED/ATTEMPTED → terminal), and for a mid-send crash recover by querying Gov.Notify **by reference** before re-sending. | Must | • **svc**<br>• idempotency patterns ← (legacy), `cp-task-manager` |
 | FR-023 | Emit **metrics and structured JSON logs**, with DLQ monitoring on inbound + result queues, and a metric/log counter for dropped `NotificationMonitor` failures (the legacy monitor events are dropped, not re-published). | Should | • **svc**<br>• house patterns ← `cpp-mbd-idam-integration`, `cp-court-list-publishing-service` |
 | FR-024 | Secure the read (query) API with authentication (IDAM). **Pulled into the MVP per Q3 — delivered alongside FR-009, not deferred to this milestone.** | Must | • **svc**<br>• auth pattern ← `cpp-mbd-idam-integration` |
+| FR-025 | **Reject unusable commands without recording them (PEG-3697, ADR-002 D14).** `ReplyTo` is required: a command without it is dead-lettered unread with reason `MissingReplyTo`. A command whose body cannot be read, or that fails Jakarta validation, is answered with a `notification-validation-failed` event (`reason`, `details`, `originalEventPayload`) on `ReplyTo` and completed. A failure to send that event abandons the message for Service Bus redelivery (dead-lettered at the queue's max delivery count). No database work happens until a command passes every check. Applies to both `ng-send-email` and `ng-send-letter`. | Must | • **svc** |
 
 ## Non-functional requirements
 
@@ -186,7 +188,7 @@ routed; see the note under Milestone 6.
 
 ### FR-007 — ReplyTo-gated result publish
 - AC-014: Given an inbound message with `ReplyTo` set, when the notification reaches a terminal state, then the corresponding result event is sent to the queue named by `ReplyTo`.
-- AC-015: Given an inbound message with no `ReplyTo` (the mi-reportdata MVP), when the notification reaches a terminal state, then no result event is published and the send completes silently.
+- ~~AC-015: Given an inbound message with no `ReplyTo` (the mi-reportdata MVP), when the notification reaches a terminal state, then no result event is published and the send completes silently.~~ **Superseded by AC-042 (FR-025).**
 
 ### FR-008 — Result-event contract parity
 - AC-016: Given a `markSent()` / `markFailed()` outcome, when the result event is built, then its payload matches the legacy golden-master payload exactly; its name is `notification-sent` / `notification-failed` (legacy prefix dropped) and it is routed to the `ReplyTo` queue instead of the topic (ADR-002 D13).
@@ -239,6 +241,13 @@ routed; see the note under Milestone 6.
 ### FR-024 — Secured query API
 - AC-039: Given an unauthenticated request to the query API, when received, then it is rejected; an authenticated request is served.
 
+### FR-025 — Rejecting unusable commands
+- AC-042: Given a send-email or send-letter command with no `ReplyTo`, when it is consumed, then it is dead-lettered with reason `MissingReplyTo` and nothing is sent or recorded.
+- AC-043: Given a command with a `ReplyTo` that fails validation, when it is consumed, then a `notification-validation-failed` event with `reason` `PAYLOAD_VALIDATION_FAILED`, `details` (`field: message`, sorted by field) and `originalEventPayload` (the body as received) is sent to `ReplyTo`, the message is completed, and nothing is sent or recorded.
+- AC-044: Given a command with a `ReplyTo` whose body is not valid JSON or has a field of the wrong type, when it is consumed, then the same event is sent with the parser's message (prefixed with the field when known) as `details`, the message is completed, and nothing is sent or recorded.
+- AC-045: Given the `notification-validation-failed` event cannot be sent, when the command is consumed, then the message is abandoned for redelivery and dead-lettered once the queue's max delivery count is reached.
+- AC-046: Given any rejected command, when it is consumed, then no database transaction is opened (ingestion is reached only by a command that passes every check).
+
 ## Interface contracts (logical)
 
 The observable contracts the service must honour. **Logical only** — names, fields, parity. The
@@ -270,11 +279,13 @@ Required set (`notificationId`, `templateId`, `sendToAddress`) and `additionalPr
 > column and read back at the terminal hop to route the result event. It is distinct from the Gov.Notify
 > **email** `replyToAddress`/`replyToAddressId` body fields above.
 
-### Outbound events — result events (queue-routed to `ReplyTo` when present)
+### Outbound events — result events (queue-routed to `ReplyTo`)
 - `notification-sent` and `notification-failed` — full logical payloads **pulled from the legacy
   service** and captured in [`legacy-result-event-contract.md`](legacy-result-event-contract.md) (the
   golden-master). MVP scope = these two only. Parity mandate (NFR-001): names + payloads byte-for-byte;
   consumers are the originating contexts; `additionalProperties: false` — add no fields.
+- `notification-validation-failed` (FR-025) — NG-only, no legacy equivalent: returned when a command
+  cannot be read or fails validation. Contract `contracts/notification-validation-failed.schema.json`.
 
 ### External providers (logical)
 - **Gov.UK Notify** — send email (templateId + personalisation + optional attachment) → returns a Notify

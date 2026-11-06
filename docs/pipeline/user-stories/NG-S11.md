@@ -17,7 +17,8 @@ duplicate effects* across retries.
 - [ ] AC-031: Given a transient send failure, when the task runs, then `markAttempted()` is recorded
   (no result event) and the task is re-scheduled per the retry list.
 - [ ] AC-032: Given a permanent failure or exhausted retries, when the task runs, then `markFailed()` is
-  called, the `notification-failed` result event is published only if `ReplyTo` is present, and the
+  called, the `notification-failed` result event is published to `ReplyTo` (*"only if `ReplyTo` is present"*
+  is superseded by NG-S15 / FR-025: `ReplyTo` is now required), and the
   task returns COMPLETED (does not keep throwing — cp-task-manager has no FAILED/DLQ state).
 - [ ] AC-033: Given an inbound consume failure before commit, when max redeliveries are exceeded, then
   the message lands on the DLQ.
