@@ -92,7 +92,7 @@ dependencies {
   // --- Azure integrations (NG-S02): ASB command consumer + Blob attachment download ---
   // Managed Identity in real envs (DefaultAzureCredential); connection-string only for emulator/local.
   implementation 'com.azure:azure-messaging-servicebus:7.19.1'
-  implementation 'com.azure:azure-storage-blob:12.37.1'
+  implementation 'com.azure:azure-storage-blob:12.37.2'
   implementation 'com.azure:azure-identity:1.19.0'
 
   // --- Integration testing: Postgres via Testcontainers ---
