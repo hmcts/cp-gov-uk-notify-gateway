@@ -11,6 +11,11 @@ spring:
       maximum-pool-size: ${CP_NG_DB_POOL_SIZE:20}
       minimum-idle: ${CP_NG_DB_MIN_IDLE:5}
       auto-commit: false   # transactions committed explicitly (@Transactional) — required for the FR-003 atomic INSERT + enqueue
+      data-source-properties:
+        # Postgres error detail ("Failing row contains (...)", key values) can carry recipients and
+        # personalisation; pgjdbc copies it into exception messages, which end up in logged stack traces.
+        # This drops the detail only: a few errors still quote a bad value in the main message.
+        logServerErrorDetail: false
   jpa:
     open-in-view: false
     hibernate:

@@ -12,9 +12,12 @@ import uk.gov.hmcts.cp.notification.integration.stubs.support.PostgresContainerS
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static uk.gov.hmcts.cp.notification.integration.testdata.NotificationEntityFactory.aNotificationEntity;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.MATERIAL_URL;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendLetterCommandFactory.LETTER_URL;
@@ -71,6 +74,18 @@ class NotificationRepositoryIntegrationTest {
     }
 
     @Test
+    void a_database_error_does_not_carry_the_row_values_in_its_messages() {
+        final OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+
+        final Throwable failure = catchThrowable(() -> notifications.insertIfAbsent(UUID.randomUUID(), "EMAIL", null,
+                "alex.morgan@example.com", "mi-reportdata", "ng-result-mi-reportdata", null, now, now));
+
+        assertThat(messagesOf(failure))
+                .anyMatch(message -> message.contains("null value in column \"status\""))
+                .noneMatch(message -> message.contains("alex.morgan@example.com"));
+    }
+
+    @Test
     void inserts_a_new_notification_once_and_ignores_a_duplicate() {
         final UUID id = UUID.randomUUID();
         final OffsetDateTime now = OffsetDateTime.now();
@@ -123,5 +138,13 @@ class NotificationRepositoryIntegrationTest {
         final NotificationEntity reloaded = notifications.findById(id).orElseThrow();
         assertThat(reloaded.getNotificationType()).isEqualTo("EMAIL");
         assertThat(reloaded.getLetterUrl()).isNull();
+    }
+
+    private static List<String> messagesOf(final Throwable failure) {
+        final List<String> messages = new ArrayList<>();
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            messages.add(String.valueOf(cause.getMessage()));
+        }
+        return messages;
     }
 }

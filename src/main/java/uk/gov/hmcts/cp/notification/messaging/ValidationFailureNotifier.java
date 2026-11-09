@@ -37,7 +37,7 @@ public class ValidationFailureNotifier {
 
     public <T> void notifyValidationFailed(
             final String replyQueue, final Set<ConstraintViolation<T>> violations, final String originalPayload) {
-        publish(replyQueue, details(violations), originalPayload);
+        publish(replyQueue, describe(violations), originalPayload);
     }
 
     public void notifyUnreadable(
@@ -54,7 +54,11 @@ public class ValidationFailureNotifier {
         resultEventPublisher.publish(replyQueue, event);
     }
 
-    private static <T> String details(final Set<ConstraintViolation<T>> violations) {
+    /**
+     * Every violation as {@code field: message}, sorted by field. Holds no submitted values while the constraint
+     * messages stay the standard ones (no {@code ${validatedValue}}), so it is also what is logged.
+     */
+    /* default */ static <T> String describe(final Set<ConstraintViolation<T>> violations) {
         final Set<ConstraintViolation<?>> sorted = new TreeSet<>(BY_FIELD_THEN_MESSAGE);
         sorted.addAll(violations);
         return new ConstraintViolationException(sorted).getMessage();
