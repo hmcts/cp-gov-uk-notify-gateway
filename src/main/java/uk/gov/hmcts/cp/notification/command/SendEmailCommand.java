@@ -8,6 +8,8 @@ import lombok.Builder;
 import java.util.Map;
 import java.util.UUID;
 
+import static uk.gov.hmcts.cp.notification.logging.Redaction.redacted;
+
 @Builder
 public record SendEmailCommand(
 
@@ -29,4 +31,15 @@ public record SendEmailCommand(
 
         String clientContext
 ) {
+    /**
+     * Keeps personal data out of logs: the recipient, reply-to address and personalisation are redacted, and
+     * fileUri, materialUrl, replyToAddressId and clientContext are left out on purpose, because blob paths and
+     * Material links can carry case or person names. Do not add them back.
+     */
+    @Override
+    public String toString() {
+        return "SendEmailCommand[notificationId=" + notificationId + ", templateId=" + templateId
+                + ", sendToAddress=" + redacted(sendToAddress) + ", replyToAddress=" + redacted(replyToAddress)
+                + ", personalisation=" + redacted(personalisation) + "]";
+    }
 }

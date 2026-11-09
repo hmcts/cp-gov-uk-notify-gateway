@@ -77,7 +77,8 @@ public class CommandMessageProcessor {
             settle(inbound, () -> ingest.accept(command, inbound.replyTo()), "ingesting");
         } else {
             LOG.warn("Rejecting invalid {} {}: {}",
-                    command.getClass().getSimpleName(), inbound.messageId(), violations);
+                    command.getClass().getSimpleName(), inbound.messageId(),
+                    ValidationFailureNotifier.describe(violations));
             reject(inbound,
                     () -> validationFailureNotifier.notifyValidationFailed(inbound.replyTo(), violations, body));
         }

@@ -20,7 +20,7 @@ and can be copied.
 | 5 | `notificationId` | in the REST path | in the message body | D1, D11 |
 | 6 | Attachment | `fileId` (file-service) | `fileUri` (Azure Blob URI); `materialUrl` unchanged | D3, D4 |
 | 7 | Permissions | Drools (System Users group) | Azure RBAC on the queues, plus NG read access on the client's blob container | D1, D3 |
-| 8 | Invalid request | synchronous `400` | `notification-validation-failed` event on the reply queue ([§2](#2-handling-a-rejected-request)) | D14 |
+| 8 | Invalid request | synchronous `400` | `notification-validation-failed` event on the reply queue; existing `400` handling moves to it ([§2](#2-handling-a-rejected-request)) | D14 |
 | 9 | `ReplyTo` | n/a (REST answers the caller) | **required** on every command; a command without it is dead-lettered unprocessed | D14 |
 | 10 | Status query | `GET /notification/{notificationId}` | removed; use the result events | D6 |
 
@@ -143,6 +143,13 @@ queue's max delivery count (10) is reached. A command with no `ReplyTo` is dead-
 | `reason` | always `PAYLOAD_VALIDATION_FAILED` |
 | `details` | every validation failure as `field: message`, comma-separated, sorted by field; for a payload that could not be read, the JSON parser's message, prefixed with the field when known |
 | `originalEventPayload` | the command body exactly as sent, **as a JSON string** |
+
+**Existing `400` handling moves to this event.** With legacy, an invalid request failed synchronously with
+`400 Bad Request` on the REST call. With NG, sending the command to the queue always succeeds, and the rejection
+arrives later as this event. Any behaviour the client has for that `400` must be kept by handling
+`notification-validation-failed` instead: for example, logging or alerting on it, marking the client's own
+record as failed, or stopping a retry. The `400` path no longer fires, so a client that only checks the HTTP
+response silently loses those rejections.
 
 To consume it:
 
