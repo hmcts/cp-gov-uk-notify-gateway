@@ -46,6 +46,14 @@ cp:
       letter-command-queue: ${CP_NG_SERVICEBUS_LETTER_COMMAND_QUEUE:ng-send-letter}
       # Messages processed in parallel per pod (legacy MDB maxSession=15).
       max-concurrent-calls: ${CP_NG_SERVICEBUS_MAX_CONCURRENT_CALLS:15}
+      # Readiness peeks each command queue in the background to confirm it can still be reached.
+      health-check:
+        # How often each queue is peeked.
+        interval: ${CP_NG_SERVICEBUS_HEALTH_CHECK_INTERVAL:30s}
+        # How long one peek may take before the queue counts as unreachable.
+        timeout: ${CP_NG_SERVICEBUS_HEALTH_CHECK_TIMEOUT:10s}
+        # How old the last successful peek may be before the queue counts as unreachable.
+        stale-after: ${CP_NG_SERVICEBUS_HEALTH_CHECK_STALE_AFTER:90s}
     blob:
       # Empty by default -> AttachmentDownloader uses DefaultAzureCredential (Workload Identity),
       # addressing the command's fileUri directly. Set the connection string only for Azurite/local
@@ -109,6 +117,12 @@ management:
     health:
       probes:
         enabled: true   # enables liveness / readiness groups
+      group:
+        # Readiness needs what the service can't work without: its database and both command queues.
+        # GOV.UK Notify and Office 365 are left out on purpose, so a provider outage doesn't fail the
+        # probe (decision log D6). Liveness keeps Boot's default of the application's own state only.
+        readiness:
+          include: readinessState, db, serviceBus
   otlp:
     metrics:
       export:

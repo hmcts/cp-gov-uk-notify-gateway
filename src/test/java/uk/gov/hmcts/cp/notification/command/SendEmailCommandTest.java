@@ -12,7 +12,7 @@ import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommand
 class SendEmailCommandTest {
 
     @Test
-    void text_shows_the_ids_and_recipient_but_not_the_reply_to_or_personalisation() {
+    void should_show_the_ids_but_not_the_recipient_reply_to_or_personalisation_in_its_text() {
         final UUID notificationId = UUID.randomUUID();
         final SendEmailCommand command = aSendEmailCommand()
                 .notificationId(notificationId)
@@ -22,12 +22,12 @@ class SendEmailCommandTest {
                 .build();
 
         assertThat(command.toString())
-                .contains(notificationId.toString(), "alex.morgan@example.com")
-                .doesNotContain("court.office@example.com", "Alex Morgan");
+                .contains(notificationId.toString())
+                .doesNotContain("alex.morgan@example.com", "court.office@example.com", "Alex Morgan");
     }
 
     @Test
-    void text_leaves_out_the_attachment_links() {
+    void should_leave_the_attachment_links_out_of_its_text() {
         final SendEmailCommand command = aSendEmailCommandWithMaterialUrl().build();
 
         assertThat(command.toString()).doesNotContain(command.materialUrl());
