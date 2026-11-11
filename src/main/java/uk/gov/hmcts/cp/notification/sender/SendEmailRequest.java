@@ -19,13 +19,13 @@ public record SendEmailRequest(
         UUID replyToAddressId) {
 
     /**
-     * Keeps personal data out of logs: the personalisation, attachment and its filename, and the reply-to address
-     * are redacted. The recipient is shown, so a send can be traced.
+     * Keeps personal data out of logs: the recipient, personalisation, attachment and its filename, and the
+     * reply-to address are redacted.
      */
     @Override
     public String toString() {
         return "SendEmailRequest[notificationId=" + notificationId + ", templateId=" + templateId
-                + ", emailAddress=" + emailAddress + ", personalisation=" + redacted(personalisation)
+                + ", emailAddress=" + redacted(emailAddress) + ", personalisation=" + redacted(personalisation)
                 + ", attachment=" + redacted(attachment) + ", attachmentFilename=" + redacted(attachmentFilename)
                 + ", replyToAddress=" + redacted(replyToAddress) + ", replyToAddressId=" + replyToAddressId + "]";
     }
