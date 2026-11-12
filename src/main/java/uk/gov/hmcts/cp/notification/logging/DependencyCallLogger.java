@@ -24,28 +24,44 @@ public class DependencyCallLogger {
 
     public void info(final DependencyCall dependencyCall, final String message, final Object... arguments) {
         final LoggingEventBuilder loggingEventBuilder = logger.atInfo();
-        addFieldsOf(dependencyCall, loggingEventBuilder);
-        loggingEventBuilder.log(message, arguments);
+        final LoggingEventBuilder loggingEventBuilderWithFields = withFieldsOf(dependencyCall, loggingEventBuilder);
+        loggingEventBuilderWithFields.log(message, arguments);
     }
 
     public void warn(final DependencyCall dependencyCall, final String message, final Object... arguments) {
         final LoggingEventBuilder loggingEventBuilder = logger.atWarn();
-        addFieldsOf(dependencyCall, loggingEventBuilder);
-        loggingEventBuilder.log(message, arguments);
+        final LoggingEventBuilder loggingEventBuilderWithFields = withFieldsOf(dependencyCall, loggingEventBuilder);
+        loggingEventBuilderWithFields.log(message, arguments);
     }
 
-    private void addFieldsOf(final DependencyCall dependencyCall, final LoggingEventBuilder loggingEventBuilder) {
+    private LoggingEventBuilder withFieldsOf(
+            final DependencyCall dependencyCall, final LoggingEventBuilder loggingEventBuilder) {
         final Dependency dependency = dependencyCall.dependency();
         final Operation operation = dependencyCall.operation();
         final Channel channel = dependencyCall.channel();
         final CallOutcome callOutcome = dependencyCall.callOutcome();
         final Optional<Integer> statusCode = dependencyCall.statusCode();
-        loggingEventBuilder.addKeyValue(DEPENDENCY.fieldName(), dependency.fieldValue());
-        loggingEventBuilder.addKeyValue(OPERATION.fieldName(), operation.fieldValue());
-        loggingEventBuilder.addKeyValue(CHANNEL.fieldName(), channel.fieldValue());
-        loggingEventBuilder.addKeyValue(OUTCOME.fieldName(), callOutcome.fieldValue());
+        final String dependencyValue = dependency.getFieldValue();
+        final String operationValue = operation.getFieldValue();
+        final String channelValue = channel.getFieldValue();
+        final String callOutcomeValue = callOutcome.getFieldValue();
+
+        LoggingEventBuilder loggingEventBuilderWithFields = withField(loggingEventBuilder, DEPENDENCY, dependencyValue);
+        loggingEventBuilderWithFields = withField(loggingEventBuilderWithFields, OPERATION, operationValue);
+        loggingEventBuilderWithFields = withField(loggingEventBuilderWithFields, CHANNEL, channelValue);
+        loggingEventBuilderWithFields = withField(loggingEventBuilderWithFields, OUTCOME, callOutcomeValue);
         if (statusCode.isPresent()) {
-            loggingEventBuilder.addKeyValue(STATUS_CODE.fieldName(), statusCode.get());
+            final Integer statusCodeValue = statusCode.get();
+            loggingEventBuilderWithFields = withField(loggingEventBuilderWithFields, STATUS_CODE, statusCodeValue);
         }
+        return loggingEventBuilderWithFields;
+    }
+
+    private LoggingEventBuilder withField(
+            final LoggingEventBuilder loggingEventBuilder,
+            final DependencyCallField dependencyCallField,
+            final Object value) {
+        final String fieldName = dependencyCallField.getFieldName();
+        return loggingEventBuilder.addKeyValue(fieldName, value);
     }
 }

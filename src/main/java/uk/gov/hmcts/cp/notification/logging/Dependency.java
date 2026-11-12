@@ -16,7 +16,7 @@ public enum Dependency {
         this.fieldValue = fieldValue;
     }
 
-    public String fieldValue() {
+    public String getFieldValue() {
         return fieldValue;
     }
 }

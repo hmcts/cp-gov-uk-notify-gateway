@@ -14,7 +14,7 @@ public enum Channel {
         this.fieldValue = fieldValue;
     }
 
-    public String fieldValue() {
+    public String getFieldValue() {
         return fieldValue;
     }
 }

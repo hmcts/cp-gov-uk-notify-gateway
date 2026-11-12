@@ -15,7 +15,7 @@ public enum Operation {
         this.fieldValue = fieldValue;
     }
 
-    public String fieldValue() {
+    public String getFieldValue() {
         return fieldValue;
     }
 }

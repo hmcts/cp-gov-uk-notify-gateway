@@ -17,7 +17,7 @@ public enum DependencyCallField {
         this.fieldName = fieldName;
     }
 
-    public String fieldName() {
+    public String getFieldName() {
         return fieldName;
     }
 }
