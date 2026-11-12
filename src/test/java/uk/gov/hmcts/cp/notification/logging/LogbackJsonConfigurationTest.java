@@ -63,7 +63,7 @@ class LogbackJsonConfigurationTest {
 
         final Map<String, Object> jsonFields = jsonFieldsOf(loggingEvent);
 
-        assertThat(jsonFields.get("message")).isEqualTo("Transient failure for notificationId " + notificationId);
+        assertThat(jsonFields.get("message")).isEqualTo("Transient failure for notificationId '" + notificationId + "'");
         assertThat(jsonFields.get("level")).isEqualTo("INFO");
         assertThat(jsonFields.get("dependency")).isEqualTo("gov-uk-notify");
         assertThat(jsonFields.get("operation")).isEqualTo("send");
@@ -74,7 +74,7 @@ class LogbackJsonConfigurationTest {
 
     private ILoggingEvent loggedEventOf(final DependencyCall dependencyCall) {
         try (CapturedLogs capturedLogs = captureLogsOf(DependencyCallLogger.class)) {
-            dependencyCallLogger.info(dependencyCall, "Transient failure for notificationId {}", notificationId);
+            dependencyCallLogger.info(dependencyCall, "Transient failure for notificationId '" + notificationId + "'");
             final List<ILoggingEvent> loggingEvents = capturedLogs.events();
             return loggingEvents.getFirst();
         }

@@ -22,16 +22,16 @@ import java.util.Optional;
 public class DependencyCallLogger {
     private final Logger logger = LoggerFactory.getLogger(DependencyCallLogger.class);
 
-    public void info(final DependencyCall dependencyCall, final String message, final Object... arguments) {
+    public void info(final DependencyCall dependencyCall, final String message) {
         final LoggingEventBuilder loggingEventBuilder = logger.atInfo();
         final LoggingEventBuilder loggingEventBuilderWithFields = withFieldsOf(dependencyCall, loggingEventBuilder);
-        loggingEventBuilderWithFields.log(message, arguments);
+        loggingEventBuilderWithFields.log(message);
     }
 
-    public void warn(final DependencyCall dependencyCall, final String message, final Object... arguments) {
+    public void warn(final DependencyCall dependencyCall, final String message) {
         final LoggingEventBuilder loggingEventBuilder = logger.atWarn();
         final LoggingEventBuilder loggingEventBuilderWithFields = withFieldsOf(dependencyCall, loggingEventBuilder);
-        loggingEventBuilderWithFields.log(message, arguments);
+        loggingEventBuilderWithFields.log(message);
     }
 
     private LoggingEventBuilder withFieldsOf(

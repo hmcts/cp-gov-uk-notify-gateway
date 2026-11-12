@@ -26,8 +26,6 @@ import java.util.UUID;
 import static java.util.Optional.empty;
 import static java.util.Optional.of;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static uk.gov.hmcts.cp.notification.logging.CallOutcome.TRANSIENT_FAILURE;
@@ -52,6 +50,10 @@ class TransientFailurePolicyTest {
     private DependencyCallLogger dependencyCallLogger;
     @Captor
     private ArgumentCaptor<DependencyCall> dependencyCallCaptor;
+    @Captor
+    private ArgumentCaptor<String> messageCaptor;
+
+    private final UUID notificationId = UUID.fromString("0f8c2b6e-1d4a-4c57-9b1e-3a2d5f6e7c80");
 
     private TransientFailurePolicy policy;
 
@@ -180,10 +182,13 @@ class TransientFailurePolicyTest {
 
     @Test
     void retryOrFail_should_log_the_dependency_call_fields_when_a_transient_failure_will_be_retried() {
-        policy.retryOrFail(UUID.randomUUID(), 503, "did not recover", jobWithRetriesRemaining(2),
+        policy.retryOrFail(notificationId, 503, "did not recover", jobWithRetriesRemaining(2),
                 List.of(60L, 300L), RetryCause.GOV_NOTIFY_SEND, LETTER);
 
-        verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), anyString(), any(Object[].class));
+        verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), messageCaptor.capture());
+        final String message = messageCaptor.getValue();
+        assertThat(message).isEqualTo("Transient failure 'invoking the Gov.Notify send API' for notificationId"
+                + " '0f8c2b6e-1d4a-4c57-9b1e-3a2d5f6e7c80' (statusCode '503') — will retry");
         final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
         assertThat(dependencyCall.dependency()).isEqualTo(GOV_UK_NOTIFY);
         assertThat(dependencyCall.operation()).isEqualTo(SEND);
@@ -194,10 +199,13 @@ class TransientFailurePolicyTest {
 
     @Test
     void retryOrFail_should_log_the_dependency_call_fields_when_scheduling_the_final_attempt() {
-        policy.retryOrFail(UUID.randomUUID(), 502, "did not recover", jobWithRetriesRemaining(1),
+        policy.retryOrFail(notificationId, 502, "did not recover", jobWithRetriesRemaining(1),
                 RetryCause.OFFICE365_SEND, EMAIL);
 
-        verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), anyString(), any(Object[].class));
+        verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), messageCaptor.capture());
+        final String message = messageCaptor.getValue();
+        assertThat(message).isEqualTo("Transient failure 'invoking the Office 365 send API' for notificationId"
+                + " '0f8c2b6e-1d4a-4c57-9b1e-3a2d5f6e7c80' (statusCode '502') — scheduling the final attempt");
         final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
         assertThat(dependencyCall.dependency()).isEqualTo(MICROSOFT_365);
         assertThat(dependencyCall.operation()).isEqualTo(SEND);
@@ -208,10 +216,14 @@ class TransientFailurePolicyTest {
 
     @Test
     void retryOrFail_should_log_the_dependency_call_fields_as_a_warning_when_retries_are_exhausted() {
-        policy.retryOrFail(UUID.randomUUID(), 500, "did not recover", finalAttemptJob(),
+        policy.retryOrFail(notificationId, 500, "did not recover", finalAttemptJob(),
                 RetryCause.STATUS_CHECK, EMAIL);
 
-        verify(dependencyCallLogger).warn(dependencyCallCaptor.capture(), anyString(), any(Object[].class));
+        verify(dependencyCallLogger).warn(dependencyCallCaptor.capture(), messageCaptor.capture());
+        final String message = messageCaptor.getValue();
+        assertThat(message).isEqualTo("Transient failure 'invoking the Gov.Notify status API' for notificationId"
+                + " '0f8c2b6e-1d4a-4c57-9b1e-3a2d5f6e7c80' (statusCode '500') did not recover after exhausting retries"
+                + " — marking FAILED");
         final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
         assertThat(dependencyCall.dependency()).isEqualTo(GOV_UK_NOTIFY);
         assertThat(dependencyCall.operation()).isEqualTo(STATUS_CHECK);
@@ -222,10 +234,13 @@ class TransientFailurePolicyTest {
 
     @Test
     void retryOrFail_should_log_no_status_code_when_the_dependency_gave_none() {
-        policy.retryOrFail(UUID.randomUUID(), null, "did not recover", jobWithRetriesRemaining(2),
+        policy.retryOrFail(notificationId, null, "did not recover", jobWithRetriesRemaining(2),
                 RetryCause.ATTACHMENT_DOWNLOAD, EMAIL);
 
-        verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), anyString(), any(Object[].class));
+        verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), messageCaptor.capture());
+        final String message = messageCaptor.getValue();
+        assertThat(message).isEqualTo("Transient failure 'downloading the attachment from blob storage' for"
+                + " notificationId '0f8c2b6e-1d4a-4c57-9b1e-3a2d5f6e7c80' (statusCode 'null') — will retry");
         final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
         assertThat(dependencyCall.dependency()).isEqualTo(BLOB_STORAGE);
         assertThat(dependencyCall.operation()).isEqualTo(DOWNLOAD);

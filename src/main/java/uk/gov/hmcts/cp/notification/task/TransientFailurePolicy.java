@@ -1,5 +1,6 @@
 package uk.gov.hmcts.cp.notification.task;
 
+import static java.lang.String.format;
 import static java.util.Optional.ofNullable;
 import static uk.gov.hmcts.cp.notification.logging.CallOutcome.TRANSIENT_FAILURE;
 import static uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo.executionInfo;
@@ -15,8 +16,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import uk.gov.hmcts.cp.notification.logging.Channel;
+import uk.gov.hmcts.cp.notification.logging.Dependency;
 import uk.gov.hmcts.cp.notification.logging.DependencyCall;
 import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
+import uk.gov.hmcts.cp.notification.logging.Operation;
 import uk.gov.hmcts.cp.notification.service.NotificationStatusService;
 import uk.gov.hmcts.cp.notification.time.Clock;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
@@ -101,18 +104,21 @@ public class TransientFailurePolicy {
             final RetryCause retryCause,
             final Channel channel) {
         final boolean polling = retryCause == RetryCause.STILL_IN_PROGRESS;
-        final DependencyCall dependencyCall = new DependencyCall(retryCause.getDependency(),
-                retryCause.getOperation(), channel, TRANSIENT_FAILURE, ofNullable(statusCode));
+        final Dependency dependency = retryCause.getDependency();
+        final Operation operation = retryCause.getOperation();
+        final String retryCauseDescription = retryCause.getDescription();
+        final DependencyCall dependencyCall =
+                new DependencyCall(dependency, operation, channel, TRANSIENT_FAILURE, ofNullable(statusCode));
         final ExecutionInfo result;
         if (retriesExhausted(executionInfo)) {
             if (polling) {
                 LOG.warn("Notification {} still in progress at Gov.Notify after exhausting status polls"
                         + " — marking FAILED", notificationId);
             } else {
-                dependencyCallLogger.warn(dependencyCall,
-                        "Transient failure {} for notificationId {} (statusCode {}) did not recover after exhausting"
-                                + " retries — marking FAILED",
-                        retryCause.getDescription(), notificationId, statusCode);
+                final String message = format("Transient failure '%s' for notificationId '%s' (statusCode '%s') did"
+                        + " not recover after exhausting retries — marking FAILED",
+                        retryCauseDescription, notificationId, statusCode);
+                dependencyCallLogger.warn(dependencyCall, message);
             }
             result = fail(notificationId, statusCode, exhaustedReason, executionInfo);
         } else if (isLastRetry(executionInfo)) {
@@ -120,18 +126,20 @@ public class TransientFailurePolicy {
                 LOG.info("Notification {} still in progress at Gov.Notify — scheduling the final status poll",
                         notificationId);
             } else {
-                dependencyCallLogger.info(dependencyCall,
-                        "Transient failure {} for notificationId {} (statusCode {}) — scheduling the final attempt",
-                        retryCause.getDescription(), notificationId, statusCode);
+                final String message = format(
+                        "Transient failure '%s' for notificationId '%s' (statusCode '%s') — scheduling the final attempt",
+                        retryCauseDescription, notificationId, statusCode);
+                dependencyCallLogger.info(dependencyCall, message);
             }
             result = finalAttempt(executionInfo, taskRetryDurationsSecs.getLast());
         } else {
             if (polling) {
                 LOG.info("Notification {} still in progress at Gov.Notify — polling again", notificationId);
             } else {
-                dependencyCallLogger.info(dependencyCall,
-                        "Transient failure {} for notificationId {} (statusCode {}) — will retry",
-                        retryCause.getDescription(), notificationId, statusCode);
+                final String message = format(
+                        "Transient failure '%s' for notificationId '%s' (statusCode '%s') — will retry",
+                        retryCauseDescription, notificationId, statusCode);
+                dependencyCallLogger.info(dependencyCall, message);
             }
             result = retry(executionInfo);
         }

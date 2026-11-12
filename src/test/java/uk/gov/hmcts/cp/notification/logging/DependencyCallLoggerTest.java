@@ -32,12 +32,12 @@ class DependencyCallLoggerTest {
 
         final ILoggingEvent loggingEvent;
         try (CapturedLogs capturedLogs = captureLogsOf(DependencyCallLogger.class)) {
-            dependencyCallLogger.warn(dependencyCall, "Material download failed for notification {}", "n-1");
+            dependencyCallLogger.warn(dependencyCall, "Material download failed for notification 'n-1'");
             loggingEvent = onlyEventIn(capturedLogs);
         }
 
         assertThat(loggingEvent.getLevel()).isEqualTo(WARN);
-        assertThat(loggingEvent.getFormattedMessage()).isEqualTo("Material download failed for notification n-1");
+        assertThat(loggingEvent.getFormattedMessage()).isEqualTo("Material download failed for notification 'n-1'");
         final Map<String, Object> fields = fieldsOf(loggingEvent);
         assertThat(fields).hasSize(5);
         assertThat(fields.get("dependency")).isEqualTo("material");
@@ -53,12 +53,12 @@ class DependencyCallLoggerTest {
 
         final ILoggingEvent loggingEvent;
         try (CapturedLogs capturedLogs = captureLogsOf(DependencyCallLogger.class)) {
-            dependencyCallLogger.info(dependencyCall, "Sent notification {} via {}", "n-2", "Office365Client");
+            dependencyCallLogger.info(dependencyCall, "Sent notification 'n-2' via 'Office365Client'");
             loggingEvent = onlyEventIn(capturedLogs);
         }
 
         assertThat(loggingEvent.getLevel()).isEqualTo(INFO);
-        assertThat(loggingEvent.getFormattedMessage()).isEqualTo("Sent notification n-2 via Office365Client");
+        assertThat(loggingEvent.getFormattedMessage()).isEqualTo("Sent notification 'n-2' via 'Office365Client'");
         final Map<String, Object> fields = fieldsOf(loggingEvent);
         assertThat(fields).hasSize(4);
         assertThat(fields.get("dependency")).isEqualTo("microsoft-365");

@@ -8,6 +8,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import uk.gov.hmcts.cp.notification.logging.Dependency;
 import uk.gov.hmcts.cp.notification.logging.DependencyCall;
 import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
 
@@ -17,7 +18,6 @@ import java.util.UUID;
 import static java.util.Optional.empty;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static uk.gov.hmcts.cp.notification.logging.CallOutcome.SUCCEEDED;
 import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
 import static uk.gov.hmcts.cp.notification.logging.Dependency.MICROSOFT_365;
@@ -47,16 +47,20 @@ class EmailSenderTest {
     private ArgumentCaptor<SendEmailRequest> requestCaptor;
     @Captor
     private ArgumentCaptor<DependencyCall> dependencyCallCaptor;
+    @Captor
+    private ArgumentCaptor<String> messageCaptor;
 
     @Test
     void logs_a_successful_send_to_the_dependency_of_the_selected_client() {
-        when(senderFactory.selectFor(any(SendEmailRequest.class))).thenReturn(emailClient);
-        when(emailClient.send(any(SendEmailRequest.class))).thenReturn(aSendResult().build());
-        when(emailClient.dependency()).thenReturn(MICROSOFT_365);
+        final UUID notificationId = UUID.fromString("0f8c2b6e-1d4a-4c57-9b1e-3a2d5f6e7c80");
+        when(senderFactory.selectFor(any(SendEmailRequest.class))).thenReturn(new StubEmailClient());
 
-        emailSender.sendEmail(aSendEmailCommand().build(), null);
+        emailSender.sendEmail(aSendEmailCommand().notificationId(notificationId).build(), null);
 
-        verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), anyString(), any(Object[].class));
+        verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), messageCaptor.capture());
+        final String message = messageCaptor.getValue();
+        assertThat(message).isEqualTo("Sent notification '0f8c2b6e-1d4a-4c57-9b1e-3a2d5f6e7c80' via 'StubEmailClient'"
+                + " (reference 'stub-reference')");
         final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
         assertThat(dependencyCall.dependency()).isEqualTo(MICROSOFT_365);
         assertThat(dependencyCall.operation()).isEqualTo(SEND);
@@ -181,5 +185,17 @@ class EmailSenderTest {
 
     private static Attachment someAttachment() {
         return aFileAttachment();
+    }
+
+    private final class StubEmailClient implements EmailClient {
+        @Override
+        public SendResult send(final SendEmailRequest request) {
+            return aSendResult().reference("stub-reference").build();
+        }
+
+        @Override
+        public Dependency dependency() {
+            return MICROSOFT_365;
+        }
     }
 }

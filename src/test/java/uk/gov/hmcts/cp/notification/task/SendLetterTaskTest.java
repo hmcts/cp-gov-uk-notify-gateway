@@ -37,7 +37,6 @@ import static java.util.Optional.of;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyString;
 import static uk.gov.hmcts.cp.notification.logging.CallOutcome.PERMANENT_FAILURE;
 import static uk.gov.hmcts.cp.notification.logging.CallOutcome.SUCCEEDED;
 import static uk.gov.hmcts.cp.notification.logging.Channel.LETTER;
@@ -73,6 +72,8 @@ class SendLetterTaskTest {
     private DependencyCallLogger dependencyCallLogger;
     @Captor
     private ArgumentCaptor<DependencyCall> dependencyCallCaptor;
+    @Captor
+    private ArgumentCaptor<String> messageCaptor;
 
     private final UUID notificationId = UUID.randomUUID();
 
@@ -120,7 +121,10 @@ class SendLetterTaskTest {
 
             task.execute(sendLetterJob(false, 3));
 
-            verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), anyString(), any(Object[].class));
+            verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), messageCaptor.capture());
+            final String message = messageCaptor.getValue();
+            assertThat(message).isEqualTo("Sent letter for notification '" + notificationId
+                    + "' via Gov.Notify (reference 'notify-letter-ref')");
             final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
             assertThat(dependencyCall.dependency()).isEqualTo(GOV_UK_NOTIFY);
             assertThat(dependencyCall.operation()).isEqualTo(SEND);
@@ -194,7 +198,10 @@ class SendLetterTaskTest {
 
             task.execute(sendLetterJob(false, 5));
 
-            verify(dependencyCallLogger).warn(dependencyCallCaptor.capture(), anyString(), any(Object[].class));
+            verify(dependencyCallLogger).warn(dependencyCallCaptor.capture(), messageCaptor.capture());
+            final String message = messageCaptor.getValue();
+            assertThat(message).isEqualTo("Permanent letter send failure for notification '" + notificationId
+                    + "' (http '400') — marking FAILED");
             final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
             assertThat(dependencyCall.dependency()).isEqualTo(GOV_UK_NOTIFY);
             assertThat(dependencyCall.operation()).isEqualTo(SEND);
@@ -251,7 +258,10 @@ class SendLetterTaskTest {
 
             task.execute(sendLetterJob(false, 5));
 
-            verify(dependencyCallLogger).warn(dependencyCallCaptor.capture(), anyString(), any(Object[].class));
+            verify(dependencyCallLogger).warn(dependencyCallCaptor.capture(), messageCaptor.capture());
+            final String message = messageCaptor.getValue();
+            assertThat(message).isEqualTo("Permanent Material letter download failure for notification '"
+                    + notificationId + "' ('Material link is not on the Material service') — marking FAILED, no retry");
             final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
             assertThat(dependencyCall.dependency()).isEqualTo(MATERIAL);
             assertThat(dependencyCall.operation()).isEqualTo(DOWNLOAD);

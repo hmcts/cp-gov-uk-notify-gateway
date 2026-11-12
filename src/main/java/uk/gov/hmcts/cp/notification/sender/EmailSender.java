@@ -1,5 +1,6 @@
 package uk.gov.hmcts.cp.notification.sender;
 
+import static java.lang.String.format;
 import static java.util.Optional.empty;
 import static uk.gov.hmcts.cp.notification.logging.CallOutcome.SUCCEEDED;
 import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
@@ -13,6 +14,8 @@ import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
 import uk.gov.hmcts.cp.notification.logging.Dependency;
 import uk.gov.hmcts.cp.notification.logging.DependencyCall;
 import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
+
+import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
@@ -37,8 +40,11 @@ public class EmailSender {
         final DependencyCall dependencyCall = new DependencyCall(dependency, SEND, EMAIL, SUCCEEDED, empty());
         final Class<? extends EmailClient> emailClientClass = emailClient.getClass();
         final String emailClientName = emailClientClass.getSimpleName();
-        dependencyCallLogger.info(dependencyCall, "Sent notification {} via {} (reference {})",
-                command.notificationId(), emailClientName, sendResult.reference());
+        final UUID notificationId = command.notificationId();
+        final String reference = sendResult.reference();
+        final String message = format(
+                "Sent notification '%s' via '%s' (reference '%s')", notificationId, emailClientName, reference);
+        dependencyCallLogger.info(dependencyCall, message);
         return sendResult;
     }
 

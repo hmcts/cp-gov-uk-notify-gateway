@@ -1,5 +1,6 @@
 package uk.gov.hmcts.cp.notification.task;
 
+import static java.lang.String.format;
 import static java.util.Optional.ofNullable;
 import static uk.gov.hmcts.cp.notification.logging.CallOutcome.PERMANENT_FAILURE;
 import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
@@ -36,6 +37,7 @@ import uk.gov.hmcts.cp.taskmanager.service.task.Task;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 @Task(SendEmailTask.TASK_NAME)
 @Component
@@ -84,9 +86,10 @@ public class SendEmailTask implements ExecutableTask {
             final Integer statusCode = permanentBlobException.getStatusCode();
             final DependencyCall dependencyCall = new DependencyCall(
                     BLOB_STORAGE, DOWNLOAD, EMAIL, PERMANENT_FAILURE, ofNullable(statusCode));
-            dependencyCallLogger.warn(dependencyCall,
-                    "Permanent attachment failure for notification {} — marking FAILED, no retry",
-                    command.notificationId());
+            final UUID notificationId = command.notificationId();
+            final String message = format(
+                    "Permanent attachment failure for notification '%s' — marking FAILED, no retry", notificationId);
+            dependencyCallLogger.warn(dependencyCall, message);
             result = failurePolicy.fail(command.notificationId(), permanentBlobException.getStatusCode(),
                     permanentBlobException.getMessage(), executionInfo);
         } catch (final BlobStorageException blobStorageException) {
@@ -112,9 +115,12 @@ public class SendEmailTask implements ExecutableTask {
             final Integer statusCode = materialAttachmentException.getStatusCode();
             final DependencyCall dependencyCall = new DependencyCall(
                     MATERIAL, DOWNLOAD, EMAIL, PERMANENT_FAILURE, ofNullable(statusCode));
-            dependencyCallLogger.warn(dependencyCall,
-                    "Permanent Material attachment failure for notification {} ({}) — marking FAILED, no retry",
-                    command.notificationId(), materialAttachmentException.getMessage());
+            final UUID notificationId = command.notificationId();
+            final String failureMessage = materialAttachmentException.getMessage();
+            final String message = format(
+                    "Permanent Material attachment failure for notification '%s' ('%s') — marking FAILED, no retry",
+                    notificationId, failureMessage);
+            dependencyCallLogger.warn(dependencyCall, message);
             result = failurePolicy.fail(command.notificationId(), materialAttachmentException.getStatusCode(),
                     materialAttachmentException.getMessage(), executionInfo);
         }
@@ -155,9 +161,11 @@ public class SendEmailTask implements ExecutableTask {
                 final Integer statusCode = govNotifyException.getHttpStatus();
                 final DependencyCall dependencyCall = new DependencyCall(
                         GOV_UK_NOTIFY, SEND, EMAIL, PERMANENT_FAILURE, ofNullable(statusCode));
-                dependencyCallLogger.warn(dependencyCall,
-                        "Permanent send failure for notification {} (http {}) — marking FAILED",
-                        command.notificationId(), govNotifyException.getHttpStatus());
+                final UUID notificationId = command.notificationId();
+                final String message = format(
+                        "Permanent send failure for notification '%s' (http '%s') — marking FAILED",
+                        notificationId, statusCode);
+                dependencyCallLogger.warn(dependencyCall, message);
                 result = failurePolicy.fail(command.notificationId(), govNotifyException.getHttpStatus(),
                         govNotifyException.getMessage(), executionInfo);
             }
@@ -172,9 +180,11 @@ public class SendEmailTask implements ExecutableTask {
             final Integer statusCode = office365Exception.getHttpStatus();
             final DependencyCall dependencyCall = new DependencyCall(
                     MICROSOFT_365, SEND, EMAIL, PERMANENT_FAILURE, ofNullable(statusCode));
-            dependencyCallLogger.warn(dependencyCall,
-                    "Permanent Office 365 send failure for notification {} (http {}) — marking FAILED",
-                    command.notificationId(), office365Exception.getHttpStatus());
+            final UUID notificationId = command.notificationId();
+            final String message = format(
+                    "Permanent Office 365 send failure for notification '%s' (http '%s') — marking FAILED",
+                    notificationId, statusCode);
+            dependencyCallLogger.warn(dependencyCall, message);
             result = failurePolicy.fail(command.notificationId(), office365Exception.getHttpStatus(),
                     office365Exception.getMessage(), executionInfo);
         } else {

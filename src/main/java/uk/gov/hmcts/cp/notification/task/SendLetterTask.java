@@ -1,5 +1,6 @@
 package uk.gov.hmcts.cp.notification.task;
 
+import static java.lang.String.format;
 import static java.util.Optional.empty;
 import static java.util.Optional.ofNullable;
 import static uk.gov.hmcts.cp.notification.logging.CallOutcome.PERMANENT_FAILURE;
@@ -29,6 +30,7 @@ import uk.gov.hmcts.cp.taskmanager.service.task.Task;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Downloads the letter's PDF through Material and sends it to Gov.Notify as a precompiled letter (legacy
@@ -86,9 +88,10 @@ public class SendLetterTask implements ExecutableTask {
             final String reference = govNotifyClient.sendPrecompiledLetter(letter.notificationId(), pdf, letter.firstClass());
             final DependencyCall dependencyCall =
                     new DependencyCall(GOV_UK_NOTIFY, SEND, LETTER, SUCCEEDED, empty());
-            dependencyCallLogger.info(dependencyCall,
-                    "Sent letter for notification {} via Gov.Notify (reference {})",
-                    letter.notificationId(), reference);
+            final UUID notificationId = letter.notificationId();
+            final String message = format(
+                    "Sent letter for notification '%s' via Gov.Notify (reference '%s')", notificationId, reference);
+            dependencyCallLogger.info(dependencyCall, message);
             executionService.executeWith(taskFactory.createCheckLetterStatusJob(letter, reference));
             result = TransientFailurePolicy.completed(executionInfo);
         } catch (final GovNotifyException govNotifyException) {
@@ -101,9 +104,11 @@ public class SendLetterTask implements ExecutableTask {
                 final Integer statusCode = govNotifyException.getHttpStatus();
                 final DependencyCall dependencyCall = new DependencyCall(
                         GOV_UK_NOTIFY, SEND, LETTER, PERMANENT_FAILURE, ofNullable(statusCode));
-                dependencyCallLogger.warn(dependencyCall,
-                        "Permanent letter send failure for notification {} (http {}) — marking FAILED",
-                        letter.notificationId(), govNotifyException.getHttpStatus());
+                final UUID notificationId = letter.notificationId();
+                final String message = format(
+                        "Permanent letter send failure for notification '%s' (http '%s') — marking FAILED",
+                        notificationId, statusCode);
+                dependencyCallLogger.warn(dependencyCall, message);
                 result = failurePolicy.fail(letter.notificationId(), govNotifyException.getHttpStatus(),
                         govNotifyException.getMessage(), executionInfo);
             }
@@ -124,9 +129,12 @@ public class SendLetterTask implements ExecutableTask {
             final Integer statusCode = materialAttachmentException.getStatusCode();
             final DependencyCall dependencyCall = new DependencyCall(
                     MATERIAL, DOWNLOAD, LETTER, PERMANENT_FAILURE, ofNullable(statusCode));
-            dependencyCallLogger.warn(dependencyCall,
-                    "Permanent Material letter download failure for notification {} ({}) — marking FAILED, no retry",
-                    letter.notificationId(), materialAttachmentException.getMessage());
+            final UUID notificationId = letter.notificationId();
+            final String failureMessage = materialAttachmentException.getMessage();
+            final String message = format(
+                    "Permanent Material letter download failure for notification '%s' ('%s') — marking FAILED, no retry",
+                    notificationId, failureMessage);
+            dependencyCallLogger.warn(dependencyCall, message);
             result = failurePolicy.fail(letter.notificationId(), materialAttachmentException.getStatusCode(),
                     materialAttachmentException.getMessage(), executionInfo);
         }
