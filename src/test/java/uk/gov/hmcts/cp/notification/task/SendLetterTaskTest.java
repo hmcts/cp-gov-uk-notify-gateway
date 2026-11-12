@@ -14,17 +14,20 @@ import tools.jackson.databind.json.JsonMapper;
 
 import uk.gov.hmcts.cp.notification.logging.DependencyCall;
 import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
+import uk.gov.hmcts.cp.notification.logging.FailureReasonClassifier;
 import uk.gov.hmcts.cp.notification.material.MaterialAttachmentDownloader;
 import uk.gov.hmcts.cp.notification.material.MaterialAttachmentException;
 import uk.gov.hmcts.cp.notification.sender.Attachment;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyClient;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
+import uk.gov.hmcts.cp.notification.sender.GovNotifyFailureClassifier;
 import uk.gov.hmcts.cp.notification.service.NotificationStatusService;
 import uk.gov.hmcts.cp.notification.time.Clock;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionStatus;
 import uk.gov.hmcts.cp.taskmanager.service.ExecutionService;
 
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -39,9 +42,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static uk.gov.hmcts.cp.notification.logging.CallOutcome.PERMANENT_FAILURE;
 import static uk.gov.hmcts.cp.notification.logging.CallOutcome.SUCCEEDED;
+import static uk.gov.hmcts.cp.notification.logging.CallOutcome.TRANSIENT_FAILURE;
 import static uk.gov.hmcts.cp.notification.logging.Channel.LETTER;
 import static uk.gov.hmcts.cp.notification.logging.Dependency.GOV_UK_NOTIFY;
 import static uk.gov.hmcts.cp.notification.logging.Dependency.MATERIAL;
+import static uk.gov.hmcts.cp.notification.logging.FailureReason.NO_RESPONSE;
 import static uk.gov.hmcts.cp.notification.logging.Operation.DOWNLOAD;
 import static uk.gov.hmcts.cp.notification.logging.Operation.SEND;
 import static org.mockito.ArgumentMatchers.eq;
@@ -82,10 +87,14 @@ class SendLetterTaskTest {
     @BeforeEach
     void createTaskWithLegacyLetterRetryDurations() {
         final Clock clock = new Clock(java.time.Clock.fixed(NOW, ZoneOffset.UTC));
+        final FailureReasonClassifier failureReasonClassifier = new FailureReasonClassifier();
+        final GovNotifyFailureClassifier govNotifyFailureClassifier =
+                new GovNotifyFailureClassifier(failureReasonClassifier);
         task = new SendLetterTask(materialAttachmentDownloader, govNotifyClient,
-                new TransientFailurePolicy(statusService, clock, dependencyCallLogger, List.of(1L)),
+                new TransientFailurePolicy(statusService, clock, dependencyCallLogger, failureReasonClassifier,
+                        List.of(1L)),
                 executionService, new CpTaskFactory(JsonMapper.builder().build(), clock), dependencyCallLogger,
-                LEGACY_LETTER_RETRY_DURATIONS);
+                govNotifyFailureClassifier, LEGACY_LETTER_RETRY_DURATIONS);
     }
 
     @Test
@@ -175,6 +184,32 @@ class SendLetterTaskTest {
             verify(statusService).markFailed(notificationId, 500,
                     "Gov.Notify letter send did not recover within the retry window");
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
+        }
+
+        @Test
+        void should_retry_and_log_that_gov_uk_notify_did_not_respond_when_it_gives_no_http_response() {
+            aDownloadableLetter();
+            final SocketTimeoutException socketTimeoutException = new SocketTimeoutException("Read timed out");
+            when(govNotifyClient.sendPrecompiledLetter(any(), any(), anyBoolean()))
+                    .thenThrow(new GovNotifyException(
+                            0, "java.net.SocketTimeoutException: Read timed out", socketTimeoutException));
+
+            final ExecutionInfo result = task.execute(sendLetterJob(false, 5));
+
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
+            assertThat(result.isShouldRetry()).isTrue();
+            verifyNoInteractions(statusService, executionService);
+            verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), messageCaptor.capture());
+            final String message = messageCaptor.getValue();
+            assertThat(message).isEqualTo("Transient failure 'invoking the Gov.Notify send API' for notificationId '"
+                    + notificationId + "' (the service did not respond) — will retry");
+            final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
+            assertThat(dependencyCall.dependency()).isEqualTo(GOV_UK_NOTIFY);
+            assertThat(dependencyCall.operation()).isEqualTo(SEND);
+            assertThat(dependencyCall.channel()).isEqualTo(LETTER);
+            assertThat(dependencyCall.callOutcome()).isEqualTo(TRANSIENT_FAILURE);
+            assertThat(dependencyCall.statusCode()).isEqualTo(empty());
+            assertThat(dependencyCall.failureReason()).isEqualTo(of(NO_RESPONSE));
         }
 
         @Test

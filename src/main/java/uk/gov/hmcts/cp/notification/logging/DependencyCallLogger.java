@@ -4,6 +4,7 @@ import static uk.gov.hmcts.cp.notification.logging.DependencyCallField.CHANNEL;
 import static uk.gov.hmcts.cp.notification.logging.DependencyCallField.DEPENDENCY;
 import static uk.gov.hmcts.cp.notification.logging.DependencyCallField.OPERATION;
 import static uk.gov.hmcts.cp.notification.logging.DependencyCallField.OUTCOME;
+import static uk.gov.hmcts.cp.notification.logging.DependencyCallField.REASON;
 import static uk.gov.hmcts.cp.notification.logging.DependencyCallField.STATUS_CODE;
 
 import org.slf4j.Logger;
@@ -15,7 +16,7 @@ import java.util.Optional;
 
 /**
  * Logs a message together with a {@link DependencyCall}'s fields (see {@link DependencyCallField}; the status code
- * only when there is one). The JSON encoder writes them as top-level fields, so that an alert can count calls and
+ * and the failure reason only when there is one). The JSON encoder writes them as top-level fields, so that an alert can count calls and
  * failures per dependency without depending on the wording of the message (PEG-3720).
  */
 @Component
@@ -41,6 +42,7 @@ public class DependencyCallLogger {
         final Channel channel = dependencyCall.channel();
         final CallOutcome callOutcome = dependencyCall.callOutcome();
         final Optional<Integer> statusCode = dependencyCall.statusCode();
+        final Optional<FailureReason> failureReason = dependencyCall.failureReason();
         final String dependencyValue = dependency.getFieldValue();
         final String operationValue = operation.getFieldValue();
         final String channelValue = channel.getFieldValue();
@@ -53,6 +55,11 @@ public class DependencyCallLogger {
         if (statusCode.isPresent()) {
             final Integer statusCodeValue = statusCode.get();
             loggingEventBuilderWithFields = withField(loggingEventBuilderWithFields, STATUS_CODE, statusCodeValue);
+        }
+        if (failureReason.isPresent()) {
+            final FailureReason failureReasonValue = failureReason.get();
+            final String failureReasonFieldValue = failureReasonValue.getFieldValue();
+            loggingEventBuilderWithFields = withField(loggingEventBuilderWithFields, REASON, failureReasonFieldValue);
         }
         return loggingEventBuilderWithFields;
     }

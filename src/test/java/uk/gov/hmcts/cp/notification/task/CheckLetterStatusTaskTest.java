@@ -12,8 +12,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import tools.jackson.databind.json.JsonMapper;
 
 import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
+import uk.gov.hmcts.cp.notification.logging.FailureReasonClassifier;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyClient;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
+import uk.gov.hmcts.cp.notification.sender.GovNotifyFailureClassifier;
 import uk.gov.hmcts.cp.notification.sender.NotificationStatus;
 import uk.gov.hmcts.cp.notification.service.NotificationStatusService;
 import uk.gov.hmcts.cp.notification.time.Clock;
@@ -21,6 +23,7 @@ import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionStatus;
 import uk.gov.hmcts.cp.taskmanager.service.ExecutionService;
 
+import java.net.ConnectException;
 import java.util.List;
 import java.util.UUID;
 
@@ -54,10 +57,13 @@ class CheckLetterStatusTaskTest {
 
     @BeforeEach
     void createTaskWithLegacyLetterStatusRetryDurations() {
-        final TransientFailurePolicy failurePolicy =
-                new TransientFailurePolicy(statusService, new Clock(), new DependencyCallLogger(), List.of(1L));
-        final LetterStatusPoller poller =
-                new LetterStatusPoller(govNotifyClient, statusService, failurePolicy, executionService, taskFactory);
+        final FailureReasonClassifier failureReasonClassifier = new FailureReasonClassifier();
+        final TransientFailurePolicy failurePolicy = new TransientFailurePolicy(
+                statusService, new Clock(), new DependencyCallLogger(), failureReasonClassifier, List.of(1L));
+        final GovNotifyFailureClassifier govNotifyFailureClassifier =
+                new GovNotifyFailureClassifier(failureReasonClassifier);
+        final LetterStatusPoller poller = new LetterStatusPoller(
+                govNotifyClient, statusService, failurePolicy, executionService, taskFactory, govNotifyFailureClassifier);
         task = new CheckLetterStatusTask(poller, executionService, taskFactory, LEGACY_LETTER_STATUS_RETRY_DURATIONS);
     }
 
@@ -202,6 +208,31 @@ class CheckLetterStatusTaskTest {
 
             verify(statusService).markFailed(notificationId, 500,
                     "Gov.Notify status polling did not recover within the retry window");
+        }
+
+        @Test
+        void should_poll_again_when_gov_notify_cannot_be_reached() {
+            final ConnectException connectException = new ConnectException("Connection refused");
+            when(govNotifyClient.checkStatus(REFERENCE)).thenThrow(
+                    new GovNotifyException(0, "java.net.ConnectException: Connection refused", connectException));
+
+            final ExecutionInfo result = task.execute(checkLetterStatusJob(5));
+
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
+            assertThat(result.isShouldRetry()).isTrue();
+            verifyNoInteractions(statusService);
+        }
+
+        @Test
+        void should_mark_failed_saying_gov_notify_could_not_be_reached_when_retries_are_exhausted() {
+            final ConnectException connectException = new ConnectException("Connection refused");
+            when(govNotifyClient.checkStatus(REFERENCE)).thenThrow(
+                    new GovNotifyException(0, "java.net.ConnectException: Connection refused", connectException));
+
+            task.execute(withRetriesRemaining(checkLetterStatusJob(5), 0));
+
+            verify(statusService).markFailed(notificationId, 0,
+                    "Gov.Notify status polling did not recover within the retry window: the service could not be reached");
         }
 
         @Test

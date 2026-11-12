@@ -19,12 +19,15 @@ import uk.gov.hmcts.cp.notification.logging.Channel;
 import uk.gov.hmcts.cp.notification.logging.Dependency;
 import uk.gov.hmcts.cp.notification.logging.DependencyCall;
 import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
+import uk.gov.hmcts.cp.notification.logging.FailureReason;
+import uk.gov.hmcts.cp.notification.logging.FailureReasonClassifier;
 import uk.gov.hmcts.cp.notification.logging.Operation;
 import uk.gov.hmcts.cp.notification.service.NotificationStatusService;
 import uk.gov.hmcts.cp.notification.time.Clock;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -39,7 +42,11 @@ import java.util.UUID;
  * <p>Without this, an unhandled exception escaping a task's {@code execute} is caught by the
  * task-manager's generic catch-all, retried, and then quietly released once retries run out —
  * leaving the notification stuck in its pre-send state with no FAILED status recorded.
-
+ *
+ * <p>A transient failure with no status code is logged with its {@link FailureReason} (the dependency could not
+ * be reached, or did not respond), and the reason is added to the FAILED reason once retries run out (PEG-3720).
+ * Polling Gov.Notify for a notification still in progress is not a failure, so it has its own
+ * {@link #pollAgainOrFail} with the same retry schedule.
  */
 @Component
 public class TransientFailurePolicy {
@@ -50,19 +57,25 @@ public class TransientFailurePolicy {
     // Created once: Json.createObjectBuilder() looks up a new JSON provider on every call.
     private static final JsonBuilderFactory JSON_BUILDER_FACTORY = JsonProvider.provider().createBuilderFactory(null);
 
+    // The Gov.Notify client reports "no HTTP response" as status 0.
+    private static final int NO_HTTP_RESPONSE = 0;
+
     private final NotificationStatusService statusService;
     private final Clock clock;
     private final DependencyCallLogger dependencyCallLogger;
+    private final FailureReasonClassifier failureReasonClassifier;
     private final List<Long> retryDurationsSecs;
 
     public TransientFailurePolicy(
             final NotificationStatusService statusService,
             final Clock clock,
             final DependencyCallLogger dependencyCallLogger,
+            final FailureReasonClassifier failureReasonClassifier,
             @Value("${cp.notification.retry.email-durations-secs}") final List<Long> retryDurationsSecs) {
         this.statusService = statusService;
         this.clock = clock;
         this.dependencyCallLogger = dependencyCallLogger;
+        this.failureReasonClassifier = failureReasonClassifier;
         this.retryDurationsSecs = List.copyOf(retryDurationsSecs);
     }
 
@@ -71,12 +84,14 @@ public class TransientFailurePolicy {
      * remaining, otherwise mark the notification FAILED with {@code exhaustedReason} and complete.
      *
      * @param notificationId  the notification being processed
-     * @param statusCode      the HTTP/status code of the failure, or {@code null} if none applies
-     * @param exhaustedReason the failure reason recorded once retries are exhausted
+     * @param statusCode      the HTTP/status code of the failure, or {@code null} if none applies; {@code 0} (the
+     *                        Gov.Notify client's "no HTTP response") is logged as no status code
+     * @param exhaustedReason the failure reason recorded once retries are exhausted; the {@link FailureReason}'s
+     *                        description is added when there is one
      * @param executionInfo   the current execution
-     * @param retryCause      the call that failed, or {@link RetryCause#STILL_IN_PROGRESS} when Gov.Notify still
-     *                        reports the notification in progress (not a failure: it is polled again)
+     * @param retryCause      the call that failed
      * @param channel         whether the notification is an email or a letter, for the failure's log fields
+     * @param failure         the failure, from which the {@link FailureReason} is worked out
      * @return {@code INPROGRESS} + retry while more than one attempt remains, {@code INPROGRESS} rescheduled
      *         as the final attempt when one remains, otherwise {@code COMPLETED}
      */
@@ -86,14 +101,16 @@ public class TransientFailurePolicy {
             final String exhaustedReason,
             final ExecutionInfo executionInfo,
             final RetryCause retryCause,
-            final Channel channel) {
-        return retryOrFail(
-                notificationId, statusCode, exhaustedReason, executionInfo, retryDurationsSecs, retryCause, channel);
+            final Channel channel,
+            final Throwable failure) {
+        return retryOrFail(notificationId, statusCode, exhaustedReason, executionInfo, retryDurationsSecs, retryCause,
+                channel, failure);
     }
 
     /**
-     * {@link #retryOrFail(UUID, Integer, String, ExecutionInfo, RetryCause, Channel)} for a task with its own retry
-     * durations (the letter tasks): the final attempt is scheduled after the last of {@code taskRetryDurationsSecs}.
+     * {@link #retryOrFail(UUID, Integer, String, ExecutionInfo, RetryCause, Channel, Throwable)} for a task with its
+     * own retry durations (the letter tasks): the final attempt is scheduled after the last of
+     * {@code taskRetryDurationsSecs}.
      */
     public ExecutionInfo retryOrFail(
             final UUID notificationId,
@@ -102,45 +119,72 @@ public class TransientFailurePolicy {
             final ExecutionInfo executionInfo,
             final List<Long> taskRetryDurationsSecs,
             final RetryCause retryCause,
-            final Channel channel) {
-        final boolean polling = retryCause == RetryCause.STILL_IN_PROGRESS;
+            final Channel channel,
+            final Throwable failure) {
         final Dependency dependency = retryCause.getDependency();
         final Operation operation = retryCause.getOperation();
         final String retryCauseDescription = retryCause.getDescription();
-        final DependencyCall dependencyCall =
-                new DependencyCall(dependency, operation, channel, TRANSIENT_FAILURE, ofNullable(statusCode));
+        final Optional<Integer> possibleStatusCode = ofNullable(statusCode);
+        final Optional<Integer> httpStatusCode = possibleStatusCode.filter(this::isHttpStatus);
+        // A status code says why on its own; without one, the failure's causes say whether the dependency could not
+        // be reached or did not respond.
+        Optional<FailureReason> failureReason = Optional.empty();
+        if (httpStatusCode.isEmpty()) {
+            failureReason = failureReasonClassifier.classify(failure);
+        }
+        final DependencyCall dependencyCall = new DependencyCall(
+                dependency, operation, channel, TRANSIENT_FAILURE, httpStatusCode, failureReason);
+        final String failureDetail = failureDetailOf(dependencyCall);
         final ExecutionInfo result;
         if (retriesExhausted(executionInfo)) {
-            if (polling) {
-                LOG.warn("Notification {} still in progress at Gov.Notify after exhausting status polls"
-                        + " — marking FAILED", notificationId);
-            } else {
-                final String message = format("Transient failure '%s' for notificationId '%s' (statusCode '%s') did"
-                        + " not recover after exhausting retries — marking FAILED",
-                        retryCauseDescription, notificationId, statusCode);
-                dependencyCallLogger.warn(dependencyCall, message);
-            }
-            result = fail(notificationId, statusCode, exhaustedReason, executionInfo);
+            final String message = format("Transient failure '%s' for notificationId '%s' (%s) did not recover"
+                    + " after exhausting retries — marking FAILED", retryCauseDescription, notificationId, failureDetail);
+            dependencyCallLogger.warn(dependencyCall, message);
+            final String failedReason = failedReasonOf(exhaustedReason, dependencyCall);
+            result = fail(notificationId, statusCode, failedReason, executionInfo);
         } else if (isLastRetry(executionInfo)) {
-            if (polling) {
-                LOG.info("Notification {} still in progress at Gov.Notify — scheduling the final status poll",
-                        notificationId);
-            } else {
-                final String message = format(
-                        "Transient failure '%s' for notificationId '%s' (statusCode '%s') — scheduling the final attempt",
-                        retryCauseDescription, notificationId, statusCode);
-                dependencyCallLogger.info(dependencyCall, message);
-            }
+            final String message = format("Transient failure '%s' for notificationId '%s' (%s) — scheduling the final"
+                    + " attempt", retryCauseDescription, notificationId, failureDetail);
+            dependencyCallLogger.info(dependencyCall, message);
             result = finalAttempt(executionInfo, taskRetryDurationsSecs.getLast());
         } else {
-            if (polling) {
-                LOG.info("Notification {} still in progress at Gov.Notify — polling again", notificationId);
-            } else {
-                final String message = format(
-                        "Transient failure '%s' for notificationId '%s' (statusCode '%s') — will retry",
-                        retryCauseDescription, notificationId, statusCode);
-                dependencyCallLogger.info(dependencyCall, message);
-            }
+            final String message = format("Transient failure '%s' for notificationId '%s' (%s) — will retry",
+                    retryCauseDescription, notificationId, failureDetail);
+            dependencyCallLogger.info(dependencyCall, message);
+            result = retry(executionInfo);
+        }
+        return result;
+    }
+
+    /**
+     * Gov.Notify still reports the notification in progress (not a failure): poll again while the task-manager
+     * retry window still has attempts remaining, otherwise mark it FAILED with {@code exhaustedReason} and complete.
+     */
+    public ExecutionInfo pollAgainOrFail(
+            final UUID notificationId, final String exhaustedReason, final ExecutionInfo executionInfo) {
+        return pollAgainOrFail(notificationId, exhaustedReason, executionInfo, retryDurationsSecs);
+    }
+
+    /**
+     * {@link #pollAgainOrFail(UUID, String, ExecutionInfo)} for a task with its own retry durations (the letter
+     * tasks): the final poll is scheduled after the last of {@code taskRetryDurationsSecs}.
+     */
+    public ExecutionInfo pollAgainOrFail(
+            final UUID notificationId,
+            final String exhaustedReason,
+            final ExecutionInfo executionInfo,
+            final List<Long> taskRetryDurationsSecs) {
+        final ExecutionInfo result;
+        if (retriesExhausted(executionInfo)) {
+            LOG.warn("Notification {} still in progress at Gov.Notify after exhausting status polls"
+                    + " — marking FAILED", notificationId);
+            result = fail(notificationId, null, exhaustedReason, executionInfo);
+        } else if (isLastRetry(executionInfo)) {
+            LOG.info("Notification {} still in progress at Gov.Notify — scheduling the final status poll",
+                    notificationId);
+            result = finalAttempt(executionInfo, taskRetryDurationsSecs.getLast());
+        } else {
+            LOG.info("Notification {} still in progress at Gov.Notify — polling again", notificationId);
             result = retry(executionInfo);
         }
         return result;
@@ -167,6 +211,38 @@ public class TransientFailurePolicy {
                 .withExecutionStatus(INPROGRESS)
                 .withShouldRetry(true)
                 .build();
+    }
+
+    private boolean isHttpStatus(final Integer statusCode) {
+        return statusCode != NO_HTTP_RESPONSE;
+    }
+
+    private String failureDetailOf(final DependencyCall dependencyCall) {
+        final Optional<Integer> httpStatusCode = dependencyCall.statusCode();
+        final Optional<FailureReason> failureReason = dependencyCall.failureReason();
+        final String failureDetail;
+        if (httpStatusCode.isPresent()) {
+            final Integer httpStatusCodeValue = httpStatusCode.get();
+            failureDetail = format("statusCode '%s'", httpStatusCodeValue);
+        } else if (failureReason.isPresent()) {
+            final FailureReason failureReasonValue = failureReason.get();
+            final String reasonDescription = failureReasonValue.getDescription();
+            failureDetail = format("the service %s", reasonDescription);
+        } else {
+            failureDetail = "no status code";
+        }
+        return failureDetail;
+    }
+
+    private String failedReasonOf(final String exhaustedReason, final DependencyCall dependencyCall) {
+        final Optional<FailureReason> failureReason = dependencyCall.failureReason();
+        String failedReason = exhaustedReason;
+        if (failureReason.isPresent()) {
+            final FailureReason failureReasonValue = failureReason.get();
+            final String reasonDescription = failureReasonValue.getDescription();
+            failedReason = format("%s: the service %s", exhaustedReason, reasonDescription);
+        }
+        return failedReason;
     }
 
     // Workaround for cp-task-manager, which never picks up a job with no retry attempts remaining: the run

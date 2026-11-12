@@ -49,6 +49,7 @@ public class SendLetterTask implements ExecutableTask {
     private final ExecutionService executionService;
     private final CpTaskFactory taskFactory;
     private final DependencyCallLogger dependencyCallLogger;
+    private final GovNotifyFailureClassifier govNotifyFailureClassifier;
     private final List<Long> retryDurationsSecs;
 
     public SendLetterTask(
@@ -58,6 +59,7 @@ public class SendLetterTask implements ExecutableTask {
             final ExecutionService executionService,
             final CpTaskFactory taskFactory,
             final DependencyCallLogger dependencyCallLogger,
+            final GovNotifyFailureClassifier govNotifyFailureClassifier,
             @Value("${cp.notification.retry.letter-durations-secs}") final List<Long> retryDurationsSecs) {
         this.materialAttachmentDownloader = materialAttachmentDownloader;
         this.govNotifyClient = govNotifyClient;
@@ -65,6 +67,7 @@ public class SendLetterTask implements ExecutableTask {
         this.executionService = executionService;
         this.taskFactory = taskFactory;
         this.dependencyCallLogger = dependencyCallLogger;
+        this.govNotifyFailureClassifier = govNotifyFailureClassifier;
         this.retryDurationsSecs = List.copyOf(retryDurationsSecs);
     }
 
@@ -87,7 +90,7 @@ public class SendLetterTask implements ExecutableTask {
             LOG.info("Sending letter for notification {} (first class: {})", letter.notificationId(), letter.firstClass());
             final String reference = govNotifyClient.sendPrecompiledLetter(letter.notificationId(), pdf, letter.firstClass());
             final DependencyCall dependencyCall =
-                    new DependencyCall(GOV_UK_NOTIFY, SEND, LETTER, SUCCEEDED, empty());
+                    new DependencyCall(GOV_UK_NOTIFY, SEND, LETTER, SUCCEEDED, empty(), empty());
             final UUID notificationId = letter.notificationId();
             final String message = format(
                     "Sent letter for notification '%s' via Gov.Notify (reference '%s')", notificationId, reference);
@@ -95,15 +98,14 @@ public class SendLetterTask implements ExecutableTask {
             executionService.executeWith(taskFactory.createCheckLetterStatusJob(letter, reference));
             result = TransientFailurePolicy.completed(executionInfo);
         } catch (final GovNotifyException govNotifyException) {
-            if (GovNotifyFailureClassifier.isTemporary(
-                    govNotifyException.getHttpStatus(), govNotifyException.getMessage())) {
+            if (govNotifyFailureClassifier.isTemporary(govNotifyException)) {
                 result = failurePolicy.retryOrFail(letter.notificationId(), govNotifyException.getHttpStatus(),
                         "Gov.Notify letter send did not recover within the retry window", executionInfo,
-                        retryDurationsSecs, RetryCause.GOV_NOTIFY_SEND, LETTER);
+                        retryDurationsSecs, RetryCause.GOV_NOTIFY_SEND, LETTER, govNotifyException);
             } else {
                 final Integer statusCode = govNotifyException.getHttpStatus();
                 final DependencyCall dependencyCall = new DependencyCall(
-                        GOV_UK_NOTIFY, SEND, LETTER, PERMANENT_FAILURE, ofNullable(statusCode));
+                        GOV_UK_NOTIFY, SEND, LETTER, PERMANENT_FAILURE, ofNullable(statusCode), empty());
                 final UUID notificationId = letter.notificationId();
                 final String message = format(
                         "Permanent letter send failure for notification '%s' (http '%s') — marking FAILED",
@@ -124,11 +126,11 @@ public class SendLetterTask implements ExecutableTask {
         if (materialAttachmentException.isRetryable()) {
             result = failurePolicy.retryOrFail(letter.notificationId(), materialAttachmentException.getStatusCode(),
                     "Material letter download did not recover within the retry window", executionInfo,
-                    retryDurationsSecs, RetryCause.MATERIAL_DOWNLOAD, LETTER);
+                    retryDurationsSecs, RetryCause.MATERIAL_DOWNLOAD, LETTER, materialAttachmentException);
         } else {
             final Integer statusCode = materialAttachmentException.getStatusCode();
             final DependencyCall dependencyCall = new DependencyCall(
-                    MATERIAL, DOWNLOAD, LETTER, PERMANENT_FAILURE, ofNullable(statusCode));
+                    MATERIAL, DOWNLOAD, LETTER, PERMANENT_FAILURE, ofNullable(statusCode), empty());
             final UUID notificationId = letter.notificationId();
             final String failureMessage = materialAttachmentException.getMessage();
             final String message = format(

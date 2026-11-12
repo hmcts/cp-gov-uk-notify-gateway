@@ -22,6 +22,7 @@ import tools.jackson.databind.json.JsonMapper;
 import uk.gov.hmcts.cp.notification.blob.AttachmentDownloader;
 import uk.gov.hmcts.cp.notification.logging.DependencyCall;
 import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
+import uk.gov.hmcts.cp.notification.logging.FailureReasonClassifier;
 import uk.gov.hmcts.cp.notification.blob.PermanentBlobException;
 import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
 import uk.gov.hmcts.cp.notification.material.MaterialAttachmentDownloader;
@@ -29,6 +30,7 @@ import uk.gov.hmcts.cp.notification.material.MaterialAttachmentException;
 import uk.gov.hmcts.cp.notification.sender.Attachment;
 import uk.gov.hmcts.cp.notification.sender.EmailSender;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
+import uk.gov.hmcts.cp.notification.sender.GovNotifyFailureClassifier;
 import uk.gov.hmcts.cp.notification.sender.Office365Exception;
 import uk.gov.hmcts.cp.notification.service.NotificationStatusService;
 import uk.gov.hmcts.cp.notification.time.Clock;
@@ -36,6 +38,8 @@ import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionStatus;
 import uk.gov.hmcts.cp.taskmanager.service.ExecutionService;
 
+import java.net.ConnectException;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
@@ -43,10 +47,14 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import static java.util.Optional.empty;
 import static java.util.Optional.of;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static uk.gov.hmcts.cp.notification.logging.CallOutcome.PERMANENT_FAILURE;
+import static uk.gov.hmcts.cp.notification.logging.CallOutcome.TRANSIENT_FAILURE;
+import static uk.gov.hmcts.cp.notification.logging.FailureReason.NO_RESPONSE;
+import static uk.gov.hmcts.cp.notification.logging.FailureReason.UNREACHABLE;
 import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
 import static uk.gov.hmcts.cp.notification.logging.Dependency.BLOB_STORAGE;
 import static uk.gov.hmcts.cp.notification.logging.Dependency.GOV_UK_NOTIFY;
@@ -98,11 +106,15 @@ class SendEmailTaskTest {
     private ArgumentCaptor<String> messageCaptor;
 
     @BeforeEach
-    void setUp() {
+    void createTaskWithLegacyEmailRetryDurations() {
+        final FailureReasonClassifier failureReasonClassifier = new FailureReasonClassifier();
+        final GovNotifyFailureClassifier govNotifyFailureClassifier =
+                new GovNotifyFailureClassifier(failureReasonClassifier);
         task = new SendEmailTask(attachmentDownloader, materialAttachmentDownloader, emailSender,
-                new TransientFailurePolicy(statusService, new Clock(), dependencyCallLogger, LEGACY_EMAIL_RETRY_DURATIONS),
+                new TransientFailurePolicy(statusService, new Clock(), dependencyCallLogger, failureReasonClassifier,
+                        LEGACY_EMAIL_RETRY_DURATIONS),
                 executionService, objectMapper, new CpTaskFactory(objectMapper, clock), dependencyCallLogger,
-                LEGACY_EMAIL_RETRY_DURATIONS);
+                govNotifyFailureClassifier, LEGACY_EMAIL_RETRY_DURATIONS);
     }
 
     @Test
@@ -509,6 +521,81 @@ class SendEmailTaskTest {
                     eq("Gov.Notify send did not recover within the retry window"));
             verify(executionService, never()).executeWith(any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
+        }
+
+        @Test
+        void should_retry_and_log_that_gov_uk_notify_could_not_be_reached_when_it_gives_no_http_response() {
+            final UUID id = UUID.fromString("0f8c2b6e-1d4a-4c57-9b1e-3a2d5f6e7c80");
+            final ConnectException connectException = new ConnectException("Connection refused");
+            when(emailSender.sendEmail(any(SendEmailCommand.class), any()))
+                    .thenThrow(new GovNotifyException(0, "java.net.ConnectException: Connection refused", connectException));
+
+            final ExecutionInfo result = task.execute(sendEmailJob(id, ""));
+
+            verify(statusService, never()).markFailed(any(), any(), any());
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
+            assertThat(result.isShouldRetry()).isTrue();
+            verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), messageCaptor.capture());
+            final String message = messageCaptor.getValue();
+            assertThat(message).isEqualTo("Transient failure 'invoking the Gov.Notify send API' for notificationId"
+                    + " '0f8c2b6e-1d4a-4c57-9b1e-3a2d5f6e7c80' (the service could not be reached) — will retry");
+            final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
+            assertThat(dependencyCall.dependency()).isEqualTo(GOV_UK_NOTIFY);
+            assertThat(dependencyCall.operation()).isEqualTo(SEND);
+            assertThat(dependencyCall.channel()).isEqualTo(EMAIL);
+            assertThat(dependencyCall.callOutcome()).isEqualTo(TRANSIENT_FAILURE);
+            assertThat(dependencyCall.statusCode()).isEqualTo(empty());
+            assertThat(dependencyCall.failureReason()).isEqualTo(of(UNREACHABLE));
+        }
+
+        @Test
+        void should_mark_failed_saying_gov_uk_notify_could_not_be_reached_when_retries_are_exhausted() {
+            final UUID id = UUID.randomUUID();
+            final ConnectException connectException = new ConnectException("Connection refused");
+            when(emailSender.sendEmail(any(SendEmailCommand.class), any()))
+                    .thenThrow(new GovNotifyException(0, "java.net.ConnectException: Connection refused", connectException));
+
+            final ExecutionInfo result = task.execute(sendEmailJobWithRetriesRemaining(id, "", 0));
+
+            verify(statusService).markFailed(id, 0,
+                    "Gov.Notify send did not recover within the retry window: the service could not be reached");
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
+        }
+
+        @Test
+        void should_mark_failed_at_once_when_gov_uk_notify_gives_no_http_response_without_an_input_output_failure() {
+            final UUID id = UUID.randomUUID();
+            when(emailSender.sendEmail(any(SendEmailCommand.class), any()))
+                    .thenThrow(new GovNotifyException(0, "reference cannot be null or empty", null));
+
+            final ExecutionInfo result = task.execute(sendEmailJob(id, ""));
+
+            verify(statusService).markFailed(id, 0, "reference cannot be null or empty");
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
+        }
+
+        @Test
+        void should_retry_and_log_that_office_365_did_not_respond_when_it_times_out() {
+            final UUID id = UUID.fromString("0f8c2b6e-1d4a-4c57-9b1e-3a2d5f6e7c80");
+            final HttpTimeoutException httpTimeoutException = new HttpTimeoutException("request timed out");
+            when(emailSender.sendEmail(any(SendEmailCommand.class), any()))
+                    .thenThrow(new Office365Exception(null, "Office 365 did not answer in time", httpTimeoutException));
+
+            final ExecutionInfo result = task.execute(sendEmailJob(id, ""));
+
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
+            assertThat(result.isShouldRetry()).isTrue();
+            verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), messageCaptor.capture());
+            final String message = messageCaptor.getValue();
+            assertThat(message).isEqualTo("Transient failure 'invoking the Office 365 send API' for notificationId"
+                    + " '0f8c2b6e-1d4a-4c57-9b1e-3a2d5f6e7c80' (the service did not respond) — will retry");
+            final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
+            assertThat(dependencyCall.dependency()).isEqualTo(MICROSOFT_365);
+            assertThat(dependencyCall.operation()).isEqualTo(SEND);
+            assertThat(dependencyCall.channel()).isEqualTo(EMAIL);
+            assertThat(dependencyCall.callOutcome()).isEqualTo(TRANSIENT_FAILURE);
+            assertThat(dependencyCall.statusCode()).isEqualTo(empty());
+            assertThat(dependencyCall.failureReason()).isEqualTo(of(NO_RESPONSE));
         }
     }
 

@@ -9,7 +9,8 @@ public enum DependencyCallField {
     OPERATION("operation"),
     CHANNEL("channel"),
     OUTCOME("outcome"),
-    STATUS_CODE("statusCode");
+    STATUS_CODE("statusCode"),
+    REASON("reason");
 
     private final String fieldName;
 

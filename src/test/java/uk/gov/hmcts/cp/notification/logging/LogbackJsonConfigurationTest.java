@@ -21,12 +21,14 @@ import java.util.List;
 import java.util.Map;
 
 import static ch.qos.logback.classic.Logger.ROOT_LOGGER_NAME;
+import static java.util.Optional.empty;
 import static java.util.Optional.of;
 import static org.assertj.core.api.Assertions.assertThat;
 import static uk.gov.hmcts.cp.notification.logging.CallOutcome.TRANSIENT_FAILURE;
 import static uk.gov.hmcts.cp.notification.logging.CapturedLogs.captureLogsOf;
 import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
 import static uk.gov.hmcts.cp.notification.logging.Dependency.GOV_UK_NOTIFY;
+import static uk.gov.hmcts.cp.notification.logging.FailureReason.NO_RESPONSE;
 import static uk.gov.hmcts.cp.notification.logging.Operation.SEND;
 
 /**
@@ -58,7 +60,8 @@ class LogbackJsonConfigurationTest {
 
     @Test
     void writes_the_dependency_call_fields_as_top_level_json_fields() {
-        final DependencyCall dependencyCall = new DependencyCall(GOV_UK_NOTIFY, SEND, EMAIL, TRANSIENT_FAILURE, of(503));
+        final DependencyCall dependencyCall =
+                new DependencyCall(GOV_UK_NOTIFY, SEND, EMAIL, TRANSIENT_FAILURE, of(503), empty());
         final ILoggingEvent loggingEvent = loggedEventOf(dependencyCall);
 
         final Map<String, Object> jsonFields = jsonFieldsOf(loggingEvent);
@@ -70,6 +73,24 @@ class LogbackJsonConfigurationTest {
         assertThat(jsonFields.get("channel")).isEqualTo("email");
         assertThat(jsonFields.get("outcome")).isEqualTo("transient-failure");
         assertThat(jsonFields.get("statusCode")).isEqualTo(503);
+        assertThat(jsonFields.containsKey("reason")).isFalse();
+    }
+
+    @Test
+    void writes_the_failure_reason_as_a_top_level_json_field() {
+        final DependencyCall dependencyCall =
+                new DependencyCall(GOV_UK_NOTIFY, SEND, EMAIL, TRANSIENT_FAILURE, empty(), of(NO_RESPONSE));
+        final ILoggingEvent loggingEvent = loggedEventOf(dependencyCall);
+
+        final Map<String, Object> jsonFields = jsonFieldsOf(loggingEvent);
+
+        assertThat(jsonFields.get("message")).isEqualTo("Transient failure for notificationId '" + notificationId + "'");
+        assertThat(jsonFields.get("dependency")).isEqualTo("gov-uk-notify");
+        assertThat(jsonFields.get("operation")).isEqualTo("send");
+        assertThat(jsonFields.get("channel")).isEqualTo("email");
+        assertThat(jsonFields.get("outcome")).isEqualTo("transient-failure");
+        assertThat(jsonFields.get("reason")).isEqualTo("no-response");
+        assertThat(jsonFields.containsKey("statusCode")).isFalse();
     }
 
     private ILoggingEvent loggedEventOf(final DependencyCall dependencyCall) {

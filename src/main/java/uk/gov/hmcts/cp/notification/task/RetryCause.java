@@ -12,16 +12,14 @@ import uk.gov.hmcts.cp.notification.logging.Operation;
 
 /**
  * Why {@link TransientFailurePolicy#retryOrFail} is retrying a notification task, so its log names the call that
- * failed and which {@link Dependency} and {@link Operation} it was. {@link #STILL_IN_PROGRESS} is not a failure:
- * Gov.Notify answered, but with a status that is not final.
+ * failed and which {@link Dependency} and {@link Operation} it was.
  */
 public enum RetryCause {
     GOV_NOTIFY_SEND("invoking the Gov.Notify send API", GOV_UK_NOTIFY, SEND),
     OFFICE365_SEND("invoking the Office 365 send API", MICROSOFT_365, SEND),
     ATTACHMENT_DOWNLOAD("downloading the attachment from blob storage", BLOB_STORAGE, DOWNLOAD),
     MATERIAL_DOWNLOAD("downloading the Material document", MATERIAL, DOWNLOAD),
-    STATUS_CHECK("invoking the Gov.Notify status API", GOV_UK_NOTIFY, Operation.STATUS_CHECK),
-    STILL_IN_PROGRESS("polling Gov.Notify for a final status", GOV_UK_NOTIFY, Operation.STATUS_CHECK);
+    STATUS_CHECK("invoking the Gov.Notify status API", GOV_UK_NOTIFY, Operation.STATUS_CHECK);
 
     private final String description;
     private final Dependency dependency;

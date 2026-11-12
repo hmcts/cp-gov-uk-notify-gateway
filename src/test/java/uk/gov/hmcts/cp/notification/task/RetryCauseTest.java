@@ -43,10 +43,4 @@ class RetryCauseTest {
         assertThat(RetryCause.STATUS_CHECK.getDependency()).isEqualTo(GOV_UK_NOTIFY);
         assertThat(RetryCause.STATUS_CHECK.getOperation()).isEqualTo(Operation.STATUS_CHECK);
     }
-
-    @Test
-    void still_in_progress_should_be_a_status_check_at_gov_uk_notify() {
-        assertThat(RetryCause.STILL_IN_PROGRESS.getDependency()).isEqualTo(GOV_UK_NOTIFY);
-        assertThat(RetryCause.STILL_IN_PROGRESS.getOperation()).isEqualTo(Operation.STATUS_CHECK);
-    }
 }

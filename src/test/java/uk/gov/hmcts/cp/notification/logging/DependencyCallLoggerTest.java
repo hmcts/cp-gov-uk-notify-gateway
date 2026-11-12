@@ -15,11 +15,14 @@ import static java.util.Optional.of;
 import static org.assertj.core.api.Assertions.assertThat;
 import static uk.gov.hmcts.cp.notification.logging.CallOutcome.PERMANENT_FAILURE;
 import static uk.gov.hmcts.cp.notification.logging.CallOutcome.SUCCEEDED;
+import static uk.gov.hmcts.cp.notification.logging.CallOutcome.TRANSIENT_FAILURE;
 import static uk.gov.hmcts.cp.notification.logging.CapturedLogs.captureLogsOf;
 import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
 import static uk.gov.hmcts.cp.notification.logging.Channel.LETTER;
+import static uk.gov.hmcts.cp.notification.logging.Dependency.GOV_UK_NOTIFY;
 import static uk.gov.hmcts.cp.notification.logging.Dependency.MATERIAL;
 import static uk.gov.hmcts.cp.notification.logging.Dependency.MICROSOFT_365;
+import static uk.gov.hmcts.cp.notification.logging.FailureReason.UNREACHABLE;
 import static uk.gov.hmcts.cp.notification.logging.Operation.DOWNLOAD;
 import static uk.gov.hmcts.cp.notification.logging.Operation.SEND;
 
@@ -28,7 +31,8 @@ class DependencyCallLoggerTest {
 
     @Test
     void warn_should_log_the_message_at_warn_with_every_field_of_the_dependency_call() {
-        final DependencyCall dependencyCall = new DependencyCall(MATERIAL, DOWNLOAD, LETTER, PERMANENT_FAILURE, of(404));
+        final DependencyCall dependencyCall =
+                new DependencyCall(MATERIAL, DOWNLOAD, LETTER, PERMANENT_FAILURE, of(404), empty());
 
         final ILoggingEvent loggingEvent;
         try (CapturedLogs capturedLogs = captureLogsOf(DependencyCallLogger.class)) {
@@ -49,7 +53,7 @@ class DependencyCallLoggerTest {
 
     @Test
     void info_should_log_the_message_at_info_without_a_status_code_field_when_there_is_no_status_code() {
-        final DependencyCall dependencyCall = new DependencyCall(MICROSOFT_365, SEND, EMAIL, SUCCEEDED, empty());
+        final DependencyCall dependencyCall = new DependencyCall(MICROSOFT_365, SEND, EMAIL, SUCCEEDED, empty(), empty());
 
         final ILoggingEvent loggingEvent;
         try (CapturedLogs capturedLogs = captureLogsOf(DependencyCallLogger.class)) {
@@ -65,6 +69,30 @@ class DependencyCallLoggerTest {
         assertThat(fields.get("operation")).isEqualTo("send");
         assertThat(fields.get("channel")).isEqualTo("email");
         assertThat(fields.get("outcome")).isEqualTo("succeeded");
+        assertThat(fields.containsKey("statusCode")).isFalse();
+        assertThat(fields.containsKey("reason")).isFalse();
+    }
+
+    @Test
+    void info_should_log_the_failure_reason_when_there_is_one() {
+        final DependencyCall dependencyCall =
+                new DependencyCall(GOV_UK_NOTIFY, SEND, EMAIL, TRANSIENT_FAILURE, empty(), of(UNREACHABLE));
+
+        final ILoggingEvent loggingEvent;
+        try (CapturedLogs capturedLogs = captureLogsOf(DependencyCallLogger.class)) {
+            dependencyCallLogger.info(dependencyCall, "Transient failure for notification 'n-3'");
+            loggingEvent = onlyEventIn(capturedLogs);
+        }
+
+        assertThat(loggingEvent.getLevel()).isEqualTo(INFO);
+        assertThat(loggingEvent.getFormattedMessage()).isEqualTo("Transient failure for notification 'n-3'");
+        final Map<String, Object> fields = fieldsOf(loggingEvent);
+        assertThat(fields).hasSize(5);
+        assertThat(fields.get("dependency")).isEqualTo("gov-uk-notify");
+        assertThat(fields.get("operation")).isEqualTo("send");
+        assertThat(fields.get("channel")).isEqualTo("email");
+        assertThat(fields.get("outcome")).isEqualTo("transient-failure");
+        assertThat(fields.get("reason")).isEqualTo("unreachable");
         assertThat(fields.containsKey("statusCode")).isFalse();
     }
 

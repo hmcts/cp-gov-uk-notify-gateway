@@ -1,6 +1,7 @@
 package uk.gov.hmcts.cp.notification.task;
 
 import static java.lang.String.format;
+import static java.util.Optional.empty;
 import static java.util.Optional.ofNullable;
 import static uk.gov.hmcts.cp.notification.logging.CallOutcome.PERMANENT_FAILURE;
 import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
@@ -52,6 +53,7 @@ public class SendEmailTask implements ExecutableTask {
     private final ObjectMapper objectMapper;
     private final CpTaskFactory taskFactory;
     private final DependencyCallLogger dependencyCallLogger;
+    private final GovNotifyFailureClassifier govNotifyFailureClassifier;
     private final List<Long> retryDurationsSecs;
 
     public SendEmailTask(
@@ -63,6 +65,7 @@ public class SendEmailTask implements ExecutableTask {
             final ObjectMapper objectMapper,
             final CpTaskFactory taskFactory,
             final DependencyCallLogger dependencyCallLogger,
+            final GovNotifyFailureClassifier govNotifyFailureClassifier,
             @Value("${cp.notification.retry.email-durations-secs}") final List<Long> retryDurationsSecs) {
         this.attachmentDownloader = attachmentDownloader;
         this.materialAttachmentDownloader = materialAttachmentDownloader;
@@ -72,6 +75,7 @@ public class SendEmailTask implements ExecutableTask {
         this.objectMapper = objectMapper;
         this.taskFactory = taskFactory;
         this.dependencyCallLogger = dependencyCallLogger;
+        this.govNotifyFailureClassifier = govNotifyFailureClassifier;
         this.retryDurationsSecs = retryDurationsSecs;
     }
 
@@ -85,7 +89,7 @@ public class SendEmailTask implements ExecutableTask {
         } catch (final PermanentBlobException permanentBlobException) {
             final Integer statusCode = permanentBlobException.getStatusCode();
             final DependencyCall dependencyCall = new DependencyCall(
-                    BLOB_STORAGE, DOWNLOAD, EMAIL, PERMANENT_FAILURE, ofNullable(statusCode));
+                    BLOB_STORAGE, DOWNLOAD, EMAIL, PERMANENT_FAILURE, ofNullable(statusCode), empty());
             final UUID notificationId = command.notificationId();
             final String message = format(
                     "Permanent attachment failure for notification '%s' — marking FAILED, no retry", notificationId);
@@ -95,7 +99,7 @@ public class SendEmailTask implements ExecutableTask {
         } catch (final BlobStorageException blobStorageException) {
             result = failurePolicy.retryOrFail(command.notificationId(), blobStorageException.getStatusCode(),
                     "Attachment download did not recover within the retry window", executionInfo,
-                    RetryCause.ATTACHMENT_DOWNLOAD, EMAIL);
+                    RetryCause.ATTACHMENT_DOWNLOAD, EMAIL, blobStorageException);
         } catch (final MaterialAttachmentException materialAttachmentException) {
             result = materialAttachmentFailed(command, materialAttachmentException, executionInfo);
         }
@@ -110,11 +114,11 @@ public class SendEmailTask implements ExecutableTask {
         if (materialAttachmentException.isRetryable()) {
             result = failurePolicy.retryOrFail(command.notificationId(), materialAttachmentException.getStatusCode(),
                     "Material attachment download did not recover within the retry window", executionInfo,
-                    RetryCause.MATERIAL_DOWNLOAD, EMAIL);
+                    RetryCause.MATERIAL_DOWNLOAD, EMAIL, materialAttachmentException);
         } else {
             final Integer statusCode = materialAttachmentException.getStatusCode();
             final DependencyCall dependencyCall = new DependencyCall(
-                    MATERIAL, DOWNLOAD, EMAIL, PERMANENT_FAILURE, ofNullable(statusCode));
+                    MATERIAL, DOWNLOAD, EMAIL, PERMANENT_FAILURE, ofNullable(statusCode), empty());
             final UUID notificationId = command.notificationId();
             final String failureMessage = materialAttachmentException.getMessage();
             final String message = format(
@@ -152,15 +156,14 @@ public class SendEmailTask implements ExecutableTask {
         } catch (final Office365Exception office365Exception) {
             result = office365SendFailed(command, office365Exception, executionInfo);
         } catch (final GovNotifyException govNotifyException) {
-            if (GovNotifyFailureClassifier.isTemporary(
-                    govNotifyException.getHttpStatus(), govNotifyException.getMessage())) {
+            if (govNotifyFailureClassifier.isTemporary(govNotifyException)) {
                 result = failurePolicy.retryOrFail(command.notificationId(), govNotifyException.getHttpStatus(),
                         "Gov.Notify send did not recover within the retry window", executionInfo,
-                        RetryCause.GOV_NOTIFY_SEND, EMAIL);
+                        RetryCause.GOV_NOTIFY_SEND, EMAIL, govNotifyException);
             } else {
                 final Integer statusCode = govNotifyException.getHttpStatus();
                 final DependencyCall dependencyCall = new DependencyCall(
-                        GOV_UK_NOTIFY, SEND, EMAIL, PERMANENT_FAILURE, ofNullable(statusCode));
+                        GOV_UK_NOTIFY, SEND, EMAIL, PERMANENT_FAILURE, ofNullable(statusCode), empty());
                 final UUID notificationId = command.notificationId();
                 final String message = format(
                         "Permanent send failure for notification '%s' (http '%s') — marking FAILED",
@@ -179,7 +182,7 @@ public class SendEmailTask implements ExecutableTask {
         if (office365Exception.isPermanent()) {
             final Integer statusCode = office365Exception.getHttpStatus();
             final DependencyCall dependencyCall = new DependencyCall(
-                    MICROSOFT_365, SEND, EMAIL, PERMANENT_FAILURE, ofNullable(statusCode));
+                    MICROSOFT_365, SEND, EMAIL, PERMANENT_FAILURE, ofNullable(statusCode), empty());
             final UUID notificationId = command.notificationId();
             final String message = format(
                     "Permanent Office 365 send failure for notification '%s' (http '%s') — marking FAILED",
@@ -190,7 +193,7 @@ public class SendEmailTask implements ExecutableTask {
         } else {
             result = failurePolicy.retryOrFail(command.notificationId(), office365Exception.getHttpStatus(),
                     "Office 365 send did not recover within the retry window", executionInfo,
-                    RetryCause.OFFICE365_SEND, EMAIL);
+                    RetryCause.OFFICE365_SEND, EMAIL, office365Exception);
         }
         return result;
     }

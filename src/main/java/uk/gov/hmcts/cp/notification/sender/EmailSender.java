@@ -37,7 +37,7 @@ public class EmailSender {
         final EmailClient emailClient = emailClientFactory.selectFor(request);
         final SendResult sendResult = emailClient.send(request);
         final Dependency dependency = emailClient.dependency();
-        final DependencyCall dependencyCall = new DependencyCall(dependency, SEND, EMAIL, SUCCEEDED, empty());
+        final DependencyCall dependencyCall = new DependencyCall(dependency, SEND, EMAIL, SUCCEEDED, empty(), empty());
         final Class<? extends EmailClient> emailClientClass = emailClient.getClass();
         final String emailClientName = emailClientClass.getSimpleName();
         final UUID notificationId = command.notificationId();

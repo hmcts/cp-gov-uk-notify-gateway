@@ -1,7 +1,6 @@
 package uk.gov.hmcts.cp.notification.task;
 
 import static uk.gov.hmcts.cp.notification.logging.Channel.LETTER;
-import static uk.gov.hmcts.cp.notification.sender.GovNotifyFailureClassifier.isTemporary;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 import uk.gov.hmcts.cp.notification.sender.GovNotifyClient;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
+import uk.gov.hmcts.cp.notification.sender.GovNotifyFailureClassifier;
 import uk.gov.hmcts.cp.notification.sender.NotificationStatus;
 import uk.gov.hmcts.cp.notification.service.NotificationStatusService;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
@@ -39,18 +39,21 @@ public class LetterStatusPoller {
     private final TransientFailurePolicy failurePolicy;
     private final ExecutionService executionService;
     private final CpTaskFactory taskFactory;
+    private final GovNotifyFailureClassifier govNotifyFailureClassifier;
 
     public LetterStatusPoller(
             final GovNotifyClient govNotifyClient,
             final NotificationStatusService statusService,
             final TransientFailurePolicy failurePolicy,
             final ExecutionService executionService,
-            final CpTaskFactory taskFactory) {
+            final CpTaskFactory taskFactory,
+            final GovNotifyFailureClassifier govNotifyFailureClassifier) {
         this.govNotifyClient = govNotifyClient;
         this.statusService = statusService;
         this.failurePolicy = failurePolicy;
         this.executionService = executionService;
         this.taskFactory = taskFactory;
+        this.govNotifyFailureClassifier = govNotifyFailureClassifier;
     }
 
     /** What a status task does when Gov.Notify has accepted the letter but not yet received it. */
@@ -81,10 +84,9 @@ public class LetterStatusPoller {
     public ExecutionInfo pollAgain(
             final LetterJob letter, final NotificationStatus lastStatus, final ExecutionInfo executionInfo,
             final List<Long> retryDurationsSecs) {
-        return failurePolicy.retryOrFail(letter.notificationId(), null,
+        return failurePolicy.pollAgainOrFail(letter.notificationId(),
                 "Gov.Notify did not reach a terminal status within the retry window (last status '"
-                        + lastStatus.getStatus() + "')", executionInfo, retryDurationsSecs,
-                RetryCause.STILL_IN_PROGRESS, LETTER);
+                        + lastStatus.getStatus() + "')", executionInfo, retryDurationsSecs);
     }
 
     private ExecutionInfo evaluate(
@@ -127,10 +129,10 @@ public class LetterStatusPoller {
             final LetterJob letter, final ExecutionInfo executionInfo, final GovNotifyException govNotifyException,
             final List<Long> retryDurationsSecs) {
         final ExecutionInfo result;
-        if (isTemporary(govNotifyException.getHttpStatus(), govNotifyException.getMessage())) {
+        if (govNotifyFailureClassifier.isTemporary(govNotifyException)) {
             result = failurePolicy.retryOrFail(letter.notificationId(), govNotifyException.getHttpStatus(),
                     "Gov.Notify status polling did not recover within the retry window", executionInfo,
-                    retryDurationsSecs, RetryCause.STATUS_CHECK, LETTER);
+                    retryDurationsSecs, RetryCause.STATUS_CHECK, LETTER, govNotifyException);
         } else {
             result = failurePolicy.fail(letter.notificationId(), govNotifyException.getHttpStatus(),
                     govNotifyException.getMessage(), executionInfo);
