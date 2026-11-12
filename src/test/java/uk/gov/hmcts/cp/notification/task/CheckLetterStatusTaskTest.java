@@ -11,6 +11,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import tools.jackson.databind.json.JsonMapper;
 
+import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyClient;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
 import uk.gov.hmcts.cp.notification.sender.NotificationStatus;
@@ -53,7 +54,8 @@ class CheckLetterStatusTaskTest {
 
     @BeforeEach
     void createTaskWithLegacyLetterStatusRetryDurations() {
-        final TransientFailurePolicy failurePolicy = new TransientFailurePolicy(statusService, new Clock(), List.of(1L));
+        final TransientFailurePolicy failurePolicy =
+                new TransientFailurePolicy(statusService, new Clock(), new DependencyCallLogger(), List.of(1L));
         final LetterStatusPoller poller =
                 new LetterStatusPoller(govNotifyClient, statusService, failurePolicy, executionService, taskFactory);
         task = new CheckLetterStatusTask(poller, executionService, taskFactory, LEGACY_LETTER_STATUS_RETRY_DURATIONS);

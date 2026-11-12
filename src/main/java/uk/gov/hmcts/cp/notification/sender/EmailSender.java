@@ -1,19 +1,24 @@
 package uk.gov.hmcts.cp.notification.sender;
 
+import static java.util.Optional.empty;
+import static uk.gov.hmcts.cp.notification.logging.CallOutcome.SUCCEEDED;
+import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
+import static uk.gov.hmcts.cp.notification.logging.Operation.SEND;
+
 import com.azure.storage.blob.BlobUrlParts;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
+import uk.gov.hmcts.cp.notification.logging.Dependency;
+import uk.gov.hmcts.cp.notification.logging.DependencyCall;
+import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
 
 @Component
 @RequiredArgsConstructor
 public class EmailSender {
-    private static final Logger LOG = LoggerFactory.getLogger(EmailSender.class);
-
     private final EmailClientFactory emailClientFactory;
+    private final DependencyCallLogger dependencyCallLogger;
 
     public SendResult sendEmail(final SendEmailCommand command, final Attachment attachment) {
         final SendEmailRequest request = new SendEmailRequest(
@@ -26,11 +31,15 @@ public class EmailSender {
                 command.replyToAddress(),
                 command.replyToAddressId());
 
-        final EmailClient client = emailClientFactory.selectFor(request);
-        final SendResult result = client.send(request);
-        LOG.info("Sent notification {} via {} (reference {})",
-                command.notificationId(), client.getClass().getSimpleName(), result.reference());
-        return result;
+        final EmailClient emailClient = emailClientFactory.selectFor(request);
+        final SendResult sendResult = emailClient.send(request);
+        final Dependency dependency = emailClient.dependency();
+        final DependencyCall dependencyCall = new DependencyCall(dependency, SEND, EMAIL, SUCCEEDED, empty());
+        final Class<? extends EmailClient> emailClientClass = emailClient.getClass();
+        final String emailClientName = emailClientClass.getSimpleName();
+        dependencyCallLogger.info(dependencyCall, "Sent notification {} via {} (reference {})",
+                command.notificationId(), emailClientName, sendResult.reference());
+        return sendResult;
     }
 
     private static String attachmentFilename(final SendEmailCommand command, final Attachment attachment) {

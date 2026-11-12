@@ -9,6 +9,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import uk.gov.hmcts.cp.notification.integration.stubs.Office365StubService;
 import uk.gov.hmcts.cp.notification.integration.stubs.support.WireMockSupport;
+import uk.gov.hmcts.cp.notification.logging.Dependency;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -21,6 +22,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static uk.gov.hmcts.cp.notification.integration.Fixtures.load;
 import static uk.gov.hmcts.cp.notification.integration.stubs.Office365StubService.anOffice365Service;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailRequestFactory.aSendEmailRequest;
+import static uk.gov.hmcts.cp.notification.logging.Dependency.MICROSOFT_365;
 
 class Office365ClientIntegrationTest {
     private static final byte[] DOCUMENT = "large document".getBytes(StandardCharsets.UTF_8);
@@ -32,6 +34,15 @@ class Office365ClientIntegrationTest {
     @BeforeEach
     void resetStubs() {
         WireMockSupport.reset();
+    }
+
+    @Test
+    void dependency_is_microsoft_365() {
+        final Office365Client office365Client = client(Office365StubService.endpoint());
+
+        final Dependency dependency = office365Client.dependency();
+
+        assertThat(dependency).isEqualTo(MICROSOFT_365);
     }
 
     @Nested

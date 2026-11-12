@@ -20,6 +20,8 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import uk.gov.hmcts.cp.notification.blob.AttachmentDownloader;
+import uk.gov.hmcts.cp.notification.logging.DependencyCall;
+import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
 import uk.gov.hmcts.cp.notification.blob.PermanentBlobException;
 import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
 import uk.gov.hmcts.cp.notification.material.MaterialAttachmentDownloader;
@@ -41,8 +43,18 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import static java.util.Optional.of;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static uk.gov.hmcts.cp.notification.logging.CallOutcome.PERMANENT_FAILURE;
+import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
+import static uk.gov.hmcts.cp.notification.logging.Dependency.BLOB_STORAGE;
+import static uk.gov.hmcts.cp.notification.logging.Dependency.GOV_UK_NOTIFY;
+import static uk.gov.hmcts.cp.notification.logging.Dependency.MATERIAL;
+import static uk.gov.hmcts.cp.notification.logging.Dependency.MICROSOFT_365;
+import static uk.gov.hmcts.cp.notification.logging.Operation.DOWNLOAD;
+import static uk.gov.hmcts.cp.notification.logging.Operation.SEND;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -70,6 +82,8 @@ class SendEmailTaskTest {
     private ExecutionService executionService;
     @Mock
     private Clock clock;
+    @Mock
+    private DependencyCallLogger dependencyCallLogger;
 
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
@@ -79,11 +93,14 @@ class SendEmailTaskTest {
     private ArgumentCaptor<Attachment> attachmentCaptor;
     @Captor
     private ArgumentCaptor<ExecutionInfo> executionInfoCaptor;
+    @Captor
+    private ArgumentCaptor<DependencyCall> dependencyCallCaptor;
 
     @BeforeEach
     void setUp() {
-        task = new SendEmailTask(attachmentDownloader, materialAttachmentDownloader, emailSender, new TransientFailurePolicy(statusService, new Clock(), LEGACY_EMAIL_RETRY_DURATIONS),
-                executionService, objectMapper, new CpTaskFactory(objectMapper, clock),
+        task = new SendEmailTask(attachmentDownloader, materialAttachmentDownloader, emailSender,
+                new TransientFailurePolicy(statusService, new Clock(), dependencyCallLogger, LEGACY_EMAIL_RETRY_DURATIONS),
+                executionService, objectMapper, new CpTaskFactory(objectMapper, clock), dependencyCallLogger,
                 LEGACY_EMAIL_RETRY_DURATIONS);
     }
 
@@ -208,6 +225,75 @@ class SendEmailTaskTest {
             assertThat(scheduled.getJobData().getString(RecordSentTask.KEY_EMAIL_SUBJECT)).isEqualTo("Your document is ready");
             verifyNoInteractions(statusService);
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
+        }
+    }
+
+    @Nested
+    class WhenAFailureIsPermanent {
+
+        @Test
+        void should_log_a_permanent_blob_storage_download_failure() {
+            final String fileUri = "https://sa.blob.core.windows.net/mi-reportdata/missing.csv";
+            when(attachmentDownloader.download(fileUri)).thenThrow(new PermanentBlobException("blob 404", 404, null));
+
+            task.execute(sendEmailJob(UUID.randomUUID(), fileUri));
+
+            verify(dependencyCallLogger).warn(dependencyCallCaptor.capture(), anyString(), any(Object[].class));
+            final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
+            assertThat(dependencyCall.dependency()).isEqualTo(BLOB_STORAGE);
+            assertThat(dependencyCall.operation()).isEqualTo(DOWNLOAD);
+            assertThat(dependencyCall.channel()).isEqualTo(EMAIL);
+            assertThat(dependencyCall.callOutcome()).isEqualTo(PERMANENT_FAILURE);
+            assertThat(dependencyCall.statusCode()).isEqualTo(of(404));
+        }
+
+        @Test
+        void should_log_a_permanent_material_download_failure() {
+            final UUID id = UUID.randomUUID();
+            when(materialAttachmentDownloader.download(MATERIAL_URL, id)).thenThrow(
+                    MaterialAttachmentException.permanent("Material rejected the document request (HTTP 400)", 400));
+
+            task.execute(sendEmailJob(id, "", MATERIAL_URL));
+
+            verify(dependencyCallLogger).warn(dependencyCallCaptor.capture(), anyString(), any(Object[].class));
+            final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
+            assertThat(dependencyCall.dependency()).isEqualTo(MATERIAL);
+            assertThat(dependencyCall.operation()).isEqualTo(DOWNLOAD);
+            assertThat(dependencyCall.channel()).isEqualTo(EMAIL);
+            assertThat(dependencyCall.callOutcome()).isEqualTo(PERMANENT_FAILURE);
+            assertThat(dependencyCall.statusCode()).isEqualTo(of(400));
+        }
+
+        @Test
+        void should_log_a_permanent_gov_uk_notify_send_failure() {
+            when(emailSender.sendEmail(any(SendEmailCommand.class), any()))
+                    .thenThrow(new GovNotifyException(400, "bad request", null));
+
+            task.execute(sendEmailJob(UUID.randomUUID(), ""));
+
+            verify(dependencyCallLogger).warn(dependencyCallCaptor.capture(), anyString(), any(Object[].class));
+            final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
+            assertThat(dependencyCall.dependency()).isEqualTo(GOV_UK_NOTIFY);
+            assertThat(dependencyCall.operation()).isEqualTo(SEND);
+            assertThat(dependencyCall.channel()).isEqualTo(EMAIL);
+            assertThat(dependencyCall.callOutcome()).isEqualTo(PERMANENT_FAILURE);
+            assertThat(dependencyCall.statusCode()).isEqualTo(of(400));
+        }
+
+        @Test
+        void should_log_a_permanent_microsoft_365_send_failure() {
+            when(emailSender.sendEmail(any(SendEmailCommand.class), any()))
+                    .thenThrow(new Office365Exception(413, "Office 365 responded with 'Request too large'", null));
+
+            task.execute(sendEmailJob(UUID.randomUUID(), ""));
+
+            verify(dependencyCallLogger).warn(dependencyCallCaptor.capture(), anyString(), any(Object[].class));
+            final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
+            assertThat(dependencyCall.dependency()).isEqualTo(MICROSOFT_365);
+            assertThat(dependencyCall.operation()).isEqualTo(SEND);
+            assertThat(dependencyCall.channel()).isEqualTo(EMAIL);
+            assertThat(dependencyCall.callOutcome()).isEqualTo(PERMANENT_FAILURE);
+            assertThat(dependencyCall.statusCode()).isEqualTo(of(413));
         }
     }
 

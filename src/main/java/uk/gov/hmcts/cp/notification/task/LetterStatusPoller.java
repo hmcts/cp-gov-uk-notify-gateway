@@ -1,5 +1,6 @@
 package uk.gov.hmcts.cp.notification.task;
 
+import static uk.gov.hmcts.cp.notification.logging.Channel.LETTER;
 import static uk.gov.hmcts.cp.notification.sender.GovNotifyFailureClassifier.isTemporary;
 
 import org.slf4j.Logger;
@@ -83,7 +84,7 @@ public class LetterStatusPoller {
         return failurePolicy.retryOrFail(letter.notificationId(), null,
                 "Gov.Notify did not reach a terminal status within the retry window (last status '"
                         + lastStatus.getStatus() + "')", executionInfo, retryDurationsSecs,
-                RetryCause.STILL_IN_PROGRESS);
+                RetryCause.STILL_IN_PROGRESS, LETTER);
     }
 
     private ExecutionInfo evaluate(
@@ -123,15 +124,16 @@ public class LetterStatusPoller {
     }
 
     private ExecutionInfo handlePollFailure(
-            final LetterJob letter, final ExecutionInfo executionInfo, final GovNotifyException e,
+            final LetterJob letter, final ExecutionInfo executionInfo, final GovNotifyException govNotifyException,
             final List<Long> retryDurationsSecs) {
         final ExecutionInfo result;
-        if (isTemporary(e.getHttpStatus(), e.getMessage())) {
-            result = failurePolicy.retryOrFail(letter.notificationId(), e.getHttpStatus(),
+        if (isTemporary(govNotifyException.getHttpStatus(), govNotifyException.getMessage())) {
+            result = failurePolicy.retryOrFail(letter.notificationId(), govNotifyException.getHttpStatus(),
                     "Gov.Notify status polling did not recover within the retry window", executionInfo,
-                    retryDurationsSecs, RetryCause.STATUS_CHECK);
+                    retryDurationsSecs, RetryCause.STATUS_CHECK, LETTER);
         } else {
-            result = failurePolicy.fail(letter.notificationId(), e.getHttpStatus(), e.getMessage(), executionInfo);
+            result = failurePolicy.fail(letter.notificationId(), govNotifyException.getHttpStatus(),
+                    govNotifyException.getMessage(), executionInfo);
         }
         return result;
     }

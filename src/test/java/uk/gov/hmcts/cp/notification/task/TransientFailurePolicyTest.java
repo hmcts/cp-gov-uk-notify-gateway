@@ -5,9 +5,13 @@ import jakarta.json.JsonObject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import uk.gov.hmcts.cp.notification.logging.DependencyCall;
+import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
 import uk.gov.hmcts.cp.notification.service.NotificationStatusService;
 import uk.gov.hmcts.cp.notification.time.Clock;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
@@ -19,9 +23,22 @@ import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.UUID;
 
+import static java.util.Optional.empty;
+import static java.util.Optional.of;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static uk.gov.hmcts.cp.notification.logging.CallOutcome.TRANSIENT_FAILURE;
+import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
+import static uk.gov.hmcts.cp.notification.logging.Channel.LETTER;
+import static uk.gov.hmcts.cp.notification.logging.Dependency.BLOB_STORAGE;
+import static uk.gov.hmcts.cp.notification.logging.Dependency.GOV_UK_NOTIFY;
+import static uk.gov.hmcts.cp.notification.logging.Dependency.MICROSOFT_365;
+import static uk.gov.hmcts.cp.notification.logging.Operation.DOWNLOAD;
+import static uk.gov.hmcts.cp.notification.logging.Operation.SEND;
+import static uk.gov.hmcts.cp.notification.logging.Operation.STATUS_CHECK;
 
 @ExtendWith(MockitoExtension.class)
 class TransientFailurePolicyTest {
@@ -31,13 +48,18 @@ class TransientFailurePolicyTest {
 
     @Mock
     private NotificationStatusService statusService;
+    @Mock
+    private DependencyCallLogger dependencyCallLogger;
+    @Captor
+    private ArgumentCaptor<DependencyCall> dependencyCallCaptor;
 
     private TransientFailurePolicy policy;
 
     @BeforeEach
     void setUp() {
         policy = new TransientFailurePolicy(
-                statusService, new Clock(java.time.Clock.fixed(NOW, ZoneOffset.UTC)), RETRY_DURATIONS);
+                statusService, new Clock(java.time.Clock.fixed(NOW, ZoneOffset.UTC)), dependencyCallLogger,
+                RETRY_DURATIONS);
     }
 
     @Test
@@ -45,7 +67,7 @@ class TransientFailurePolicyTest {
         final UUID id = UUID.randomUUID();
 
         final ExecutionInfo result = policy.retryOrFail(
-                id, 500, "did not recover", jobWithRetriesRemaining(2), RetryCause.GOV_NOTIFY_SEND);
+                id, 500, "did not recover", jobWithRetriesRemaining(2), RetryCause.GOV_NOTIFY_SEND, EMAIL);
 
         verifyNoInteractions(statusService);
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
@@ -57,7 +79,7 @@ class TransientFailurePolicyTest {
         final UUID id = UUID.randomUUID();
 
         final ExecutionInfo result = policy.retryOrFail(
-                id, 500, "did not recover", jobWithRetriesRemaining(null), RetryCause.GOV_NOTIFY_SEND);
+                id, 500, "did not recover", jobWithRetriesRemaining(null), RetryCause.GOV_NOTIFY_SEND, EMAIL);
 
         verifyNoInteractions(statusService);
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
@@ -69,7 +91,7 @@ class TransientFailurePolicyTest {
         final UUID id = UUID.randomUUID();
 
         final ExecutionInfo result = policy.retryOrFail(
-                id, 503, "did not recover", jobWithRetriesRemaining(0), RetryCause.GOV_NOTIFY_SEND);
+                id, 503, "did not recover", jobWithRetriesRemaining(0), RetryCause.GOV_NOTIFY_SEND, EMAIL);
 
         verify(statusService).markFailed(id, 503, "did not recover");
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
@@ -81,7 +103,7 @@ class TransientFailurePolicyTest {
         final ExecutionInfo lastRetry = jobWithRetriesRemaining(1);
 
         final ExecutionInfo result = policy.retryOrFail(
-                id, 503, "did not recover", lastRetry, RetryCause.GOV_NOTIFY_SEND);
+                id, 503, "did not recover", lastRetry, RetryCause.GOV_NOTIFY_SEND, EMAIL);
 
         verifyNoInteractions(statusService);
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
@@ -99,7 +121,7 @@ class TransientFailurePolicyTest {
 
         final ExecutionInfo result = policy.retryOrFail(
                 id, 503, "did not recover", jobWithRetriesRemaining(1), List.of(60L, 43_200L),
-                RetryCause.GOV_NOTIFY_SEND);
+                RetryCause.GOV_NOTIFY_SEND, EMAIL);
 
         verifyNoInteractions(statusService);
         assertThat(result.isShouldRetry()).isFalse();
@@ -112,7 +134,7 @@ class TransientFailurePolicyTest {
         final UUID id = UUID.randomUUID();
 
         final ExecutionInfo result = policy.retryOrFail(
-                id, 503, "did not recover", finalAttemptJob(), RetryCause.GOV_NOTIFY_SEND);
+                id, 503, "did not recover", finalAttemptJob(), RetryCause.GOV_NOTIFY_SEND, EMAIL);
 
         verify(statusService).markFailed(id, 503, "did not recover");
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
@@ -123,7 +145,7 @@ class TransientFailurePolicyTest {
         final UUID id = UUID.randomUUID();
 
         final ExecutionInfo result = policy.retryOrFail(
-                id, null, "no terminal status", jobWithRetriesRemaining(2), RetryCause.STILL_IN_PROGRESS);
+                id, null, "no terminal status", jobWithRetriesRemaining(2), RetryCause.STILL_IN_PROGRESS, EMAIL);
 
         verifyNoInteractions(statusService);
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
@@ -136,7 +158,7 @@ class TransientFailurePolicyTest {
 
         final ExecutionInfo result = policy.retryOrFail(
                 id, null, "no terminal status", jobWithRetriesRemaining(1), List.of(60L, 43_200L),
-                RetryCause.STILL_IN_PROGRESS);
+                RetryCause.STILL_IN_PROGRESS, EMAIL);
 
         verifyNoInteractions(statusService);
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
@@ -150,10 +172,74 @@ class TransientFailurePolicyTest {
         final UUID id = UUID.randomUUID();
 
         final ExecutionInfo result = policy.retryOrFail(
-                id, null, "no terminal status", finalAttemptJob(), RetryCause.STILL_IN_PROGRESS);
+                id, null, "no terminal status", finalAttemptJob(), RetryCause.STILL_IN_PROGRESS, EMAIL);
 
         verify(statusService).markFailed(id, null, "no terminal status");
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
+    }
+
+    @Test
+    void retryOrFail_should_log_the_dependency_call_fields_when_a_transient_failure_will_be_retried() {
+        policy.retryOrFail(UUID.randomUUID(), 503, "did not recover", jobWithRetriesRemaining(2),
+                List.of(60L, 300L), RetryCause.GOV_NOTIFY_SEND, LETTER);
+
+        verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), anyString(), any(Object[].class));
+        final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
+        assertThat(dependencyCall.dependency()).isEqualTo(GOV_UK_NOTIFY);
+        assertThat(dependencyCall.operation()).isEqualTo(SEND);
+        assertThat(dependencyCall.channel()).isEqualTo(LETTER);
+        assertThat(dependencyCall.callOutcome()).isEqualTo(TRANSIENT_FAILURE);
+        assertThat(dependencyCall.statusCode()).isEqualTo(of(503));
+    }
+
+    @Test
+    void retryOrFail_should_log_the_dependency_call_fields_when_scheduling_the_final_attempt() {
+        policy.retryOrFail(UUID.randomUUID(), 502, "did not recover", jobWithRetriesRemaining(1),
+                RetryCause.OFFICE365_SEND, EMAIL);
+
+        verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), anyString(), any(Object[].class));
+        final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
+        assertThat(dependencyCall.dependency()).isEqualTo(MICROSOFT_365);
+        assertThat(dependencyCall.operation()).isEqualTo(SEND);
+        assertThat(dependencyCall.channel()).isEqualTo(EMAIL);
+        assertThat(dependencyCall.callOutcome()).isEqualTo(TRANSIENT_FAILURE);
+        assertThat(dependencyCall.statusCode()).isEqualTo(of(502));
+    }
+
+    @Test
+    void retryOrFail_should_log_the_dependency_call_fields_as_a_warning_when_retries_are_exhausted() {
+        policy.retryOrFail(UUID.randomUUID(), 500, "did not recover", finalAttemptJob(),
+                RetryCause.STATUS_CHECK, EMAIL);
+
+        verify(dependencyCallLogger).warn(dependencyCallCaptor.capture(), anyString(), any(Object[].class));
+        final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
+        assertThat(dependencyCall.dependency()).isEqualTo(GOV_UK_NOTIFY);
+        assertThat(dependencyCall.operation()).isEqualTo(STATUS_CHECK);
+        assertThat(dependencyCall.channel()).isEqualTo(EMAIL);
+        assertThat(dependencyCall.callOutcome()).isEqualTo(TRANSIENT_FAILURE);
+        assertThat(dependencyCall.statusCode()).isEqualTo(of(500));
+    }
+
+    @Test
+    void retryOrFail_should_log_no_status_code_when_the_dependency_gave_none() {
+        policy.retryOrFail(UUID.randomUUID(), null, "did not recover", jobWithRetriesRemaining(2),
+                RetryCause.ATTACHMENT_DOWNLOAD, EMAIL);
+
+        verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), anyString(), any(Object[].class));
+        final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
+        assertThat(dependencyCall.dependency()).isEqualTo(BLOB_STORAGE);
+        assertThat(dependencyCall.operation()).isEqualTo(DOWNLOAD);
+        assertThat(dependencyCall.channel()).isEqualTo(EMAIL);
+        assertThat(dependencyCall.callOutcome()).isEqualTo(TRANSIENT_FAILURE);
+        assertThat(dependencyCall.statusCode()).isEqualTo(empty());
+    }
+
+    @Test
+    void retryOrFail_should_log_no_dependency_call_when_gov_notify_reports_the_notification_still_in_progress() {
+        policy.retryOrFail(UUID.randomUUID(), null, "no terminal status", jobWithRetriesRemaining(2),
+                RetryCause.STILL_IN_PROGRESS, LETTER);
+
+        verifyNoInteractions(dependencyCallLogger);
     }
 
     @Test

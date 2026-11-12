@@ -1,5 +1,7 @@
 package uk.gov.hmcts.cp.notification.task;
 
+import static java.util.Optional.ofNullable;
+import static uk.gov.hmcts.cp.notification.logging.CallOutcome.TRANSIENT_FAILURE;
 import static uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo.executionInfo;
 import static uk.gov.hmcts.cp.taskmanager.domain.ExecutionStatus.COMPLETED;
 import static uk.gov.hmcts.cp.taskmanager.domain.ExecutionStatus.INPROGRESS;
@@ -12,6 +14,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import uk.gov.hmcts.cp.notification.logging.Channel;
+import uk.gov.hmcts.cp.notification.logging.DependencyCall;
+import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
 import uk.gov.hmcts.cp.notification.service.NotificationStatusService;
 import uk.gov.hmcts.cp.notification.time.Clock;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
@@ -44,14 +49,17 @@ public class TransientFailurePolicy {
 
     private final NotificationStatusService statusService;
     private final Clock clock;
+    private final DependencyCallLogger dependencyCallLogger;
     private final List<Long> retryDurationsSecs;
 
     public TransientFailurePolicy(
             final NotificationStatusService statusService,
             final Clock clock,
+            final DependencyCallLogger dependencyCallLogger,
             @Value("${cp.notification.retry.email-durations-secs}") final List<Long> retryDurationsSecs) {
         this.statusService = statusService;
         this.clock = clock;
+        this.dependencyCallLogger = dependencyCallLogger;
         this.retryDurationsSecs = List.copyOf(retryDurationsSecs);
     }
 
@@ -63,8 +71,9 @@ public class TransientFailurePolicy {
      * @param statusCode      the HTTP/status code of the failure, or {@code null} if none applies
      * @param exhaustedReason the failure reason recorded once retries are exhausted
      * @param executionInfo   the current execution
-     * @param cause           the call that failed, or {@link RetryCause#STILL_IN_PROGRESS} when Gov.Notify still
+     * @param retryCause      the call that failed, or {@link RetryCause#STILL_IN_PROGRESS} when Gov.Notify still
      *                        reports the notification in progress (not a failure: it is polled again)
+     * @param channel         whether the notification is an email or a letter, for the failure's log fields
      * @return {@code INPROGRESS} + retry while more than one attempt remains, {@code INPROGRESS} rescheduled
      *         as the final attempt when one remains, otherwise {@code COMPLETED}
      */
@@ -73,13 +82,15 @@ public class TransientFailurePolicy {
             final Integer statusCode,
             final String exhaustedReason,
             final ExecutionInfo executionInfo,
-            final RetryCause cause) {
-        return retryOrFail(notificationId, statusCode, exhaustedReason, executionInfo, retryDurationsSecs, cause);
+            final RetryCause retryCause,
+            final Channel channel) {
+        return retryOrFail(
+                notificationId, statusCode, exhaustedReason, executionInfo, retryDurationsSecs, retryCause, channel);
     }
 
     /**
-     * {@link #retryOrFail(UUID, Integer, String, ExecutionInfo, RetryCause)} for a task with its own retry durations
-     * (the letter tasks): the final attempt is scheduled after the last of {@code taskRetryDurationsSecs}.
+     * {@link #retryOrFail(UUID, Integer, String, ExecutionInfo, RetryCause, Channel)} for a task with its own retry
+     * durations (the letter tasks): the final attempt is scheduled after the last of {@code taskRetryDurationsSecs}.
      */
     public ExecutionInfo retryOrFail(
             final UUID notificationId,
@@ -87,16 +98,21 @@ public class TransientFailurePolicy {
             final String exhaustedReason,
             final ExecutionInfo executionInfo,
             final List<Long> taskRetryDurationsSecs,
-            final RetryCause cause) {
-        final boolean polling = cause == RetryCause.STILL_IN_PROGRESS;
+            final RetryCause retryCause,
+            final Channel channel) {
+        final boolean polling = retryCause == RetryCause.STILL_IN_PROGRESS;
+        final DependencyCall dependencyCall = new DependencyCall(retryCause.getDependency(),
+                retryCause.getOperation(), channel, TRANSIENT_FAILURE, ofNullable(statusCode));
         final ExecutionInfo result;
         if (retriesExhausted(executionInfo)) {
             if (polling) {
                 LOG.warn("Notification {} still in progress at Gov.Notify after exhausting status polls"
                         + " — marking FAILED", notificationId);
             } else {
-                LOG.warn("Transient failure {} for notificationId {} (statusCode {}) did not recover after"
-                        + " exhausting retries — marking FAILED", cause.getDescription(), notificationId, statusCode);
+                dependencyCallLogger.warn(dependencyCall,
+                        "Transient failure {} for notificationId {} (statusCode {}) did not recover after exhausting"
+                                + " retries — marking FAILED",
+                        retryCause.getDescription(), notificationId, statusCode);
             }
             result = fail(notificationId, statusCode, exhaustedReason, executionInfo);
         } else if (isLastRetry(executionInfo)) {
@@ -104,16 +120,18 @@ public class TransientFailurePolicy {
                 LOG.info("Notification {} still in progress at Gov.Notify — scheduling the final status poll",
                         notificationId);
             } else {
-                LOG.info("Transient failure {} for notificationId {} (statusCode {}) — scheduling the final attempt",
-                        cause.getDescription(), notificationId, statusCode);
+                dependencyCallLogger.info(dependencyCall,
+                        "Transient failure {} for notificationId {} (statusCode {}) — scheduling the final attempt",
+                        retryCause.getDescription(), notificationId, statusCode);
             }
             result = finalAttempt(executionInfo, taskRetryDurationsSecs.getLast());
         } else {
             if (polling) {
                 LOG.info("Notification {} still in progress at Gov.Notify — polling again", notificationId);
             } else {
-                LOG.info("Transient failure {} for notificationId {} (statusCode {}) — will retry",
-                        cause.getDescription(), notificationId, statusCode);
+                dependencyCallLogger.info(dependencyCall,
+                        "Transient failure {} for notificationId {} (statusCode {}) — will retry",
+                        retryCause.getDescription(), notificationId, statusCode);
             }
             result = retry(executionInfo);
         }

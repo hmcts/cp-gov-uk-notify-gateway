@@ -9,6 +9,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyClient;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
 import uk.gov.hmcts.cp.notification.sender.NotificationStatus;
@@ -47,7 +48,8 @@ class CheckEmailStatusTaskTest {
     @BeforeEach
     void setUp() {
         task = new CheckEmailStatusTask(govNotifyClient, statusService,
-                new TransientFailurePolicy(statusService, new Clock(), LEGACY_EMAIL_RETRY_DURATIONS),
+                new TransientFailurePolicy(
+                        statusService, new Clock(), new DependencyCallLogger(), LEGACY_EMAIL_RETRY_DURATIONS),
                 LEGACY_EMAIL_RETRY_DURATIONS);
     }
 

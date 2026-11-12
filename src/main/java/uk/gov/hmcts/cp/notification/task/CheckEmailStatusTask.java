@@ -1,5 +1,6 @@
 package uk.gov.hmcts.cp.notification.task;
 
+import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
 import static uk.gov.hmcts.cp.notification.sender.GovNotifyFailureClassifier.isTemporary;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -69,7 +70,7 @@ public class CheckEmailStatusTask implements ExecutableTask {
         } else if (status.isInProgress()) {
             result = failurePolicy.retryOrFail(notificationId, null,
                     "Gov.Notify did not reach a terminal status within the retry window (last status '"
-                            + status.getStatus() + "')", executionInfo, RetryCause.STILL_IN_PROGRESS);
+                            + status.getStatus() + "')", executionInfo, RetryCause.STILL_IN_PROGRESS, EMAIL);
         } else {
             result = failurePolicy.fail(notificationId, null,
                     "Gov.Notify responded with status '" + status.getStatus() + "'", executionInfo);
@@ -78,14 +79,15 @@ public class CheckEmailStatusTask implements ExecutableTask {
     }
 
     private ExecutionInfo handlePollFailure(
-            final UUID notificationId, final ExecutionInfo executionInfo, final GovNotifyException e) {
+            final UUID notificationId, final ExecutionInfo executionInfo, final GovNotifyException govNotifyException) {
         final ExecutionInfo result;
-        if (isTemporary(e.getHttpStatus(), e.getMessage())) {
-            result = failurePolicy.retryOrFail(notificationId, e.getHttpStatus(),
+        if (isTemporary(govNotifyException.getHttpStatus(), govNotifyException.getMessage())) {
+            result = failurePolicy.retryOrFail(notificationId, govNotifyException.getHttpStatus(),
                     "Gov.Notify status polling did not recover within the retry window", executionInfo,
-                    RetryCause.STATUS_CHECK);
+                    RetryCause.STATUS_CHECK, EMAIL);
         } else {
-            result = failurePolicy.fail(notificationId, e.getHttpStatus(), e.getMessage(), executionInfo);
+            result = failurePolicy.fail(notificationId, govNotifyException.getHttpStatus(),
+                    govNotifyException.getMessage(), executionInfo);
         }
         return result;
     }

@@ -10,6 +10,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import uk.gov.hmcts.cp.notification.logging.Dependency;
 import uk.gov.service.notify.LetterResponse;
 import uk.gov.service.notify.Notification;
 import uk.gov.service.notify.NotificationClient;
@@ -31,6 +32,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailRequestFactory.aSendEmailRequest;
+import static uk.gov.hmcts.cp.notification.logging.Dependency.GOV_UK_NOTIFY;
 
 @ExtendWith(MockitoExtension.class)
 class GovNotifyClientTest {
@@ -46,6 +48,13 @@ class GovNotifyClientTest {
 
     @Captor
     private ArgumentCaptor<InputStream> documentCaptor;
+
+    @Test
+    void dependency_is_gov_uk_notify() {
+        final Dependency dependency = govNotifyClient.dependency();
+
+        assertThat(dependency).isEqualTo(GOV_UK_NOTIFY);
+    }
 
     @Nested
     class Sending {
