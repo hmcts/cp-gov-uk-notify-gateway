@@ -28,6 +28,12 @@ public class MaterialSteps {
         await().atMost(ofSeconds(60)).untilAsserted(() -> material.documentWasRequestedOnEachAttempt(materialId, 2));
     }
 
+    @Then("the Material service is asked for the document only once")
+    public void the_material_service_is_asked_for_the_document_only_once() {
+        final String materialId = context.getMaterialId();
+        material.documentWasRequestedOnce(materialId);
+    }
+
     @Then("the document is fetched from the Material service on behalf of the notification")
     public void the_document_is_fetched_from_the_material_service_on_behalf_of_the_notification() {
         final String materialId = context.getMaterialId();

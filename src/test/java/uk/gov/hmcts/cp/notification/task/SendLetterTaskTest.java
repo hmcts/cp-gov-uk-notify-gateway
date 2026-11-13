@@ -12,6 +12,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import tools.jackson.databind.json.JsonMapper;
 
+import uk.gov.hmcts.cp.notification.logging.AttachmentFailureClassifier;
 import uk.gov.hmcts.cp.notification.logging.DependencyCall;
 import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
 import uk.gov.hmcts.cp.notification.logging.FailureReasonClassifier;
@@ -56,6 +57,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendLetterCommandFactory.LETTER_URL;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_BAD_LINK;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_NOT_FOUND;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_UNAVAILABLE;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_FAILED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_REJECTED;
 
 @ExtendWith(MockitoExtension.class)
 class SendLetterTaskTest {
@@ -94,7 +100,7 @@ class SendLetterTaskTest {
                 new TransientFailurePolicy(statusService, clock, dependencyCallLogger, failureReasonClassifier,
                         List.of(1L)),
                 executionService, new CpTaskFactory(JsonMapper.builder().build(), clock), dependencyCallLogger,
-                govNotifyFailureClassifier, LEGACY_LETTER_RETRY_DURATIONS);
+                govNotifyFailureClassifier, new AttachmentFailureClassifier(), LEGACY_LETTER_RETRY_DURATIONS);
     }
 
     @Test
@@ -182,7 +188,7 @@ class SendLetterTaskTest {
             final ExecutionInfo result = task.execute(sendLetterJobWithRetriesRemaining(0));
 
             verify(statusService).markFailed(notificationId, 500,
-                    "Gov.Notify letter send did not recover within the retry window");
+                    "Gov.Notify letter send did not recover within the retry window", PROVIDER_FAILED);
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
 
@@ -220,7 +226,8 @@ class SendLetterTaskTest {
 
             final ExecutionInfo result = task.execute(sendLetterJob(false, 5));
 
-            verify(statusService).markFailed(notificationId, 400, "precompiledPDF must be a valid PDF file");
+            verify(statusService).markFailed(notificationId, 400, "precompiledPDF must be a valid PDF file",
+                    PROVIDER_REJECTED);
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
             verifyNoInteractions(executionService);
         }
@@ -270,7 +277,7 @@ class SendLetterTaskTest {
             task.execute(sendLetterJobWithRetriesRemaining(0));
 
             verify(statusService).markFailed(notificationId, 500,
-                    "Material letter download did not recover within the retry window");
+                    "Material letter download did not recover within the retry window", ATTACHMENT_UNAVAILABLE);
         }
 
         @Test
@@ -281,8 +288,22 @@ class SendLetterTaskTest {
             final ExecutionInfo result = task.execute(sendLetterJob(false, 5));
 
             verify(statusService).markFailed(eq(notificationId), isNull(),
-                    eq("Material link is not on the Material service"));
+                    eq("Material link is not on the Material service"), eq(ATTACHMENT_BAD_LINK));
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
+            verify(govNotifyClient, never()).sendPrecompiledLetter(any(), any(), anyBoolean());
+        }
+
+        @Test
+        void should_mark_failed_without_retry_as_attachment_not_found_when_material_has_no_such_letter() {
+            when(materialAttachmentDownloader.download(LETTER_URL, notificationId))
+                    .thenThrow(MaterialAttachmentException.permanent("Material has no such document (HTTP 404)", 404));
+
+            final ExecutionInfo result = task.execute(sendLetterJob(false, 5));
+
+            verify(statusService).markFailed(notificationId, 404, "Material has no such document (HTTP 404)",
+                    ATTACHMENT_NOT_FOUND);
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
+            assertThat(result.isShouldRetry()).isFalse();
             verify(govNotifyClient, never()).sendPrecompiledLetter(any(), any(), anyBoolean());
         }
 

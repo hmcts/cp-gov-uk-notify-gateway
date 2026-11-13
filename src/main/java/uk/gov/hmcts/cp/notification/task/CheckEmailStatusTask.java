@@ -1,6 +1,8 @@
 package uk.gov.hmcts.cp.notification.task;
 
 import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.DELIVERY_FAILED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_REJECTED;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -76,7 +78,7 @@ public class CheckEmailStatusTask implements ExecutableTask {
                             + status.getStatus() + "')", executionInfo);
         } else {
             result = failurePolicy.fail(notificationId, null,
-                    "Gov.Notify responded with status '" + status.getStatus() + "'", executionInfo);
+                    "Gov.Notify responded with status '" + status.getStatus() + "'", DELIVERY_FAILED, executionInfo);
         }
         return result;
     }
@@ -90,7 +92,7 @@ public class CheckEmailStatusTask implements ExecutableTask {
                     RetryCause.STATUS_CHECK, EMAIL, govNotifyException);
         } else {
             result = failurePolicy.fail(notificationId, govNotifyException.getHttpStatus(),
-                    govNotifyException.getMessage(), executionInfo);
+                    govNotifyException.getMessage(), PROVIDER_REJECTED, executionInfo);
         }
         return result;
     }

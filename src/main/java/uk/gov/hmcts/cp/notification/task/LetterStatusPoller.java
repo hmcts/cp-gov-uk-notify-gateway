@@ -1,6 +1,8 @@
 package uk.gov.hmcts.cp.notification.task;
 
 import static uk.gov.hmcts.cp.notification.logging.Channel.LETTER;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.DELIVERY_FAILED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_REJECTED;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -102,7 +104,7 @@ public class LetterStatusPoller {
             result = pollAgain(letter, status, executionInfo, retryDurationsSecs);
         } else {
             result = failurePolicy.fail(letter.notificationId(), null,
-                    "Gov.Notify responded with status '" + status.getStatus() + "'", executionInfo);
+                    "Gov.Notify responded with status '" + status.getStatus() + "'", DELIVERY_FAILED, executionInfo);
         }
         return result;
     }
@@ -120,7 +122,7 @@ public class LetterStatusPoller {
             executionService.executeWith(taskFactory.createSendLetterJob(letter.forResend()));
             result = TransientFailurePolicy.completed(executionInfo);
         } else {
-            result = failurePolicy.fail(letter.notificationId(), BAD_REQUEST, reason, executionInfo);
+            result = failurePolicy.fail(letter.notificationId(), BAD_REQUEST, reason, DELIVERY_FAILED, executionInfo);
         }
         return result;
     }
@@ -135,7 +137,7 @@ public class LetterStatusPoller {
                     retryDurationsSecs, RetryCause.STATUS_CHECK, LETTER, govNotifyException);
         } else {
             result = failurePolicy.fail(letter.notificationId(), govNotifyException.getHttpStatus(),
-                    govNotifyException.getMessage(), executionInfo);
+                    govNotifyException.getMessage(), PROVIDER_REJECTED, executionInfo);
         }
         return result;
     }

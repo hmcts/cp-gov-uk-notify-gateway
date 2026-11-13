@@ -10,14 +10,17 @@ import static uk.gov.hmcts.cp.notification.logging.Dependency.GOV_UK_NOTIFY;
 import static uk.gov.hmcts.cp.notification.logging.Dependency.MATERIAL;
 import static uk.gov.hmcts.cp.notification.logging.Operation.DOWNLOAD;
 import static uk.gov.hmcts.cp.notification.logging.Operation.SEND;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_REJECTED;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import uk.gov.hmcts.cp.notification.logging.AttachmentFailureClassifier;
 import uk.gov.hmcts.cp.notification.logging.DependencyCall;
 import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
+import uk.gov.hmcts.cp.notification.logging.OutcomeReason;
 import uk.gov.hmcts.cp.notification.material.MaterialAttachmentDownloader;
 import uk.gov.hmcts.cp.notification.material.MaterialAttachmentException;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyClient;
@@ -50,6 +53,7 @@ public class SendLetterTask implements ExecutableTask {
     private final CpTaskFactory taskFactory;
     private final DependencyCallLogger dependencyCallLogger;
     private final GovNotifyFailureClassifier govNotifyFailureClassifier;
+    private final AttachmentFailureClassifier attachmentFailureClassifier;
     private final List<Long> retryDurationsSecs;
 
     public SendLetterTask(
@@ -60,6 +64,7 @@ public class SendLetterTask implements ExecutableTask {
             final CpTaskFactory taskFactory,
             final DependencyCallLogger dependencyCallLogger,
             final GovNotifyFailureClassifier govNotifyFailureClassifier,
+            final AttachmentFailureClassifier attachmentFailureClassifier,
             @Value("${cp.notification.retry.letter-durations-secs}") final List<Long> retryDurationsSecs) {
         this.materialAttachmentDownloader = materialAttachmentDownloader;
         this.govNotifyClient = govNotifyClient;
@@ -68,6 +73,7 @@ public class SendLetterTask implements ExecutableTask {
         this.taskFactory = taskFactory;
         this.dependencyCallLogger = dependencyCallLogger;
         this.govNotifyFailureClassifier = govNotifyFailureClassifier;
+        this.attachmentFailureClassifier = attachmentFailureClassifier;
         this.retryDurationsSecs = List.copyOf(retryDurationsSecs);
     }
 
@@ -112,7 +118,7 @@ public class SendLetterTask implements ExecutableTask {
                         notificationId, statusCode);
                 dependencyCallLogger.warn(dependencyCall, message);
                 result = failurePolicy.fail(letter.notificationId(), govNotifyException.getHttpStatus(),
-                        govNotifyException.getMessage(), executionInfo);
+                        govNotifyException.getMessage(), PROVIDER_REJECTED, executionInfo);
             }
         }
         return result;
@@ -137,8 +143,9 @@ public class SendLetterTask implements ExecutableTask {
                     "Permanent Material letter download failure for notification '%s' ('%s') — marking FAILED, no retry",
                     notificationId, failureMessage);
             dependencyCallLogger.warn(dependencyCall, message);
+            final OutcomeReason outcomeReason = attachmentFailureClassifier.classify(ofNullable(statusCode));
             result = failurePolicy.fail(letter.notificationId(), materialAttachmentException.getStatusCode(),
-                    materialAttachmentException.getMessage(), executionInfo);
+                    materialAttachmentException.getMessage(), outcomeReason, executionInfo);
         }
         return result;
     }

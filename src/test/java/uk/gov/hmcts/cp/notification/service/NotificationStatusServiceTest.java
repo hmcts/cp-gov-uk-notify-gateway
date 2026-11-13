@@ -7,6 +7,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import uk.gov.hmcts.cp.notification.logging.NotificationOutcomeEvent;
+import uk.gov.hmcts.cp.notification.logging.NotificationOutcomeLogger;
 import uk.gov.hmcts.cp.notification.persistence.NotificationEntity;
 import uk.gov.hmcts.cp.notification.persistence.NotificationRepository;
 import uk.gov.hmcts.cp.notification.result.NotificationFailedEvent;
@@ -27,6 +29,11 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
+import static uk.gov.hmcts.cp.notification.logging.Channel.LETTER;
+import static uk.gov.hmcts.cp.notification.logging.NotificationOutcome.FAILED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_NOT_FOUND;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_REJECTED;
 import static uk.gov.hmcts.cp.notification.integration.testdata.NotificationEntityFactory.aLetterNotificationEntity;
 import static uk.gov.hmcts.cp.notification.integration.testdata.NotificationEntityFactory.aNotificationEntity;
 
@@ -39,6 +46,8 @@ class NotificationStatusServiceTest {
     private Clock clock;
     @Mock
     private ResultEventPublisher resultEventPublisher;
+    @Mock
+    private NotificationOutcomeLogger notificationOutcomeLogger;
 
     private static final NotificationEmailDetails EMAIL_DETAILS = new NotificationEmailDetails(
             "Your NCES extract", "Please find your report attached.", "noreply@justice.gov.uk");
@@ -46,8 +55,9 @@ class NotificationStatusServiceTest {
     private NotificationStatusService service;
 
     @BeforeEach
-    void setUp() {
-        service = new NotificationStatusService(notificationRepository, clock, resultEventPublisher);
+    void createServiceWithMockedCollaborators() {
+        service = new NotificationStatusService(
+                notificationRepository, clock, resultEventPublisher, notificationOutcomeLogger);
     }
 
     @Test
@@ -85,7 +95,7 @@ class NotificationStatusServiceTest {
         when(notificationRepository.findById(id))
                 .thenReturn(Optional.of(aNotificationEntity().notificationId(id).build()));
 
-        service.markFailed(id, 500, "provider rejected the send");
+        service.markFailed(id, 500, "provider rejected the send", PROVIDER_REJECTED);
 
         final ArgumentCaptor<NotificationEntity> saved = ArgumentCaptor.forClass(NotificationEntity.class);
         verify(notificationRepository).save(saved.capture());
@@ -134,13 +144,61 @@ class NotificationStatusServiceTest {
                 .resultQueue("originator-reply-queue")
                 .build()));
 
-        service.markFailed(id, 400, "provider rejected the send");
+        service.markFailed(id, 400, "provider rejected the send", PROVIDER_REJECTED);
 
         final ArgumentCaptor<NotificationFailedEvent> event = ArgumentCaptor.forClass(NotificationFailedEvent.class);
         verify(resultEventPublisher).publish(eq("originator-reply-queue"), event.capture());
         assertThat(event.getValue().getNotificationId()).isEqualTo(id);
         assertThat(event.getValue().getStatusCode()).isEqualTo(400);
         assertThat(event.getValue().getErrorMessage()).isEqualTo("provider rejected the send");
+    }
+
+    @Test
+    void logs_a_failed_email_with_its_reply_queue_and_outcome_reason() {
+        final UUID id = UUID.fromString("5a7e1c2d-3b4f-4e6a-9c8d-1f2e3d4c5b6a");
+        when(notificationRepository.findById(id)).thenReturn(Optional.of(aNotificationEntity()
+                .notificationId(id)
+                .resultQueue("sjp-notification-result")
+                .build()));
+
+        service.markFailed(id, 400, "provider rejected the send", PROVIDER_REJECTED);
+
+        final ArgumentCaptor<NotificationOutcomeEvent> notificationOutcomeEventCaptor =
+                ArgumentCaptor.forClass(NotificationOutcomeEvent.class);
+        final ArgumentCaptor<String> messageCaptor = ArgumentCaptor.forClass(String.class);
+        verify(notificationOutcomeLogger).warn(notificationOutcomeEventCaptor.capture(), messageCaptor.capture());
+        final NotificationOutcomeEvent notificationOutcomeEvent = notificationOutcomeEventCaptor.getValue();
+        assertThat(notificationOutcomeEvent.notificationOutcome()).isEqualTo(FAILED);
+        assertThat(notificationOutcomeEvent.outcomeReason()).isEqualTo(PROVIDER_REJECTED);
+        assertThat(notificationOutcomeEvent.channel()).isEqualTo(EMAIL);
+        assertThat(notificationOutcomeEvent.replyQueue()).isEqualTo("sjp-notification-result");
+        final String message = messageCaptor.getValue();
+        assertThat(message).isEqualTo("Notification '5a7e1c2d-3b4f-4e6a-9c8d-1f2e3d4c5b6a' for reply queue"
+                + " 'sjp-notification-result' failed: the provider rejected the notification");
+    }
+
+    @Test
+    void logs_a_failed_letter_with_the_letter_channel() {
+        final UUID id = UUID.fromString("6b8f2d3e-4c5a-4f7b-8d9e-2a3b4c5d6e7f");
+        when(notificationRepository.findById(id)).thenReturn(Optional.of(aLetterNotificationEntity()
+                .notificationId(id)
+                .resultQueue("dvla-notification-result")
+                .build()));
+
+        service.markFailed(id, 404, "Material has no such document (HTTP 404)", ATTACHMENT_NOT_FOUND);
+
+        final ArgumentCaptor<NotificationOutcomeEvent> notificationOutcomeEventCaptor =
+                ArgumentCaptor.forClass(NotificationOutcomeEvent.class);
+        final ArgumentCaptor<String> messageCaptor = ArgumentCaptor.forClass(String.class);
+        verify(notificationOutcomeLogger).warn(notificationOutcomeEventCaptor.capture(), messageCaptor.capture());
+        final NotificationOutcomeEvent notificationOutcomeEvent = notificationOutcomeEventCaptor.getValue();
+        assertThat(notificationOutcomeEvent.notificationOutcome()).isEqualTo(FAILED);
+        assertThat(notificationOutcomeEvent.outcomeReason()).isEqualTo(ATTACHMENT_NOT_FOUND);
+        assertThat(notificationOutcomeEvent.channel()).isEqualTo(LETTER);
+        assertThat(notificationOutcomeEvent.replyQueue()).isEqualTo("dvla-notification-result");
+        final String message = messageCaptor.getValue();
+        assertThat(message).isEqualTo("Notification '6b8f2d3e-4c5a-4f7b-8d9e-2a3b4c5d6e7f' for reply queue"
+                + " 'dvla-notification-result' failed: the attachment was not found");
     }
 
     @Test

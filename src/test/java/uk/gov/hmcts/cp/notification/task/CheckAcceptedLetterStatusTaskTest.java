@@ -32,6 +32,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendLetterCommandFactory.LETTER_URL;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.STATUS_UNKNOWN;
 
 @ExtendWith(MockitoExtension.class)
 class CheckAcceptedLetterStatusTaskTest {
@@ -99,7 +100,8 @@ class CheckAcceptedLetterStatusTaskTest {
         final ExecutionInfo result = task.execute(withRetriesRemaining(0));
 
         verify(statusService).markFailed(eq(notificationId), isNull(),
-                eq("Gov.Notify did not reach a terminal status within the retry window (last status 'accepted')"));
+                eq("Gov.Notify did not reach a terminal status within the retry window (last status 'accepted')"),
+                eq(STATUS_UNKNOWN));
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
     }
 

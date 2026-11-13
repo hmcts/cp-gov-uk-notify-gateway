@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
@@ -20,9 +21,11 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import uk.gov.hmcts.cp.notification.blob.AttachmentDownloader;
+import uk.gov.hmcts.cp.notification.logging.AttachmentFailureClassifier;
 import uk.gov.hmcts.cp.notification.logging.DependencyCall;
 import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
 import uk.gov.hmcts.cp.notification.logging.FailureReasonClassifier;
+import uk.gov.hmcts.cp.notification.logging.OutcomeReason;
 import uk.gov.hmcts.cp.notification.blob.PermanentBlobException;
 import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
 import uk.gov.hmcts.cp.notification.material.MaterialAttachmentDownloader;
@@ -48,6 +51,7 @@ import java.util.UUID;
 import java.util.stream.Stream;
 
 import static java.util.Optional.empty;
+import static org.junit.jupiter.params.provider.Arguments.arguments;
 import static java.util.Optional.of;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -62,6 +66,14 @@ import static uk.gov.hmcts.cp.notification.logging.Dependency.MATERIAL;
 import static uk.gov.hmcts.cp.notification.logging.Dependency.MICROSOFT_365;
 import static uk.gov.hmcts.cp.notification.logging.Operation.DOWNLOAD;
 import static uk.gov.hmcts.cp.notification.logging.Operation.SEND;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_ACCESS_REFUSED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_BAD_LINK;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_NOT_FOUND;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_TOO_LARGE;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_UNAVAILABLE;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_FAILED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_REJECTED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_UNREACHABLE;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -114,7 +126,7 @@ class SendEmailTaskTest {
                 new TransientFailurePolicy(statusService, new Clock(), dependencyCallLogger, failureReasonClassifier,
                         LEGACY_EMAIL_RETRY_DURATIONS),
                 executionService, objectMapper, new CpTaskFactory(objectMapper, clock), dependencyCallLogger,
-                govNotifyFailureClassifier, LEGACY_EMAIL_RETRY_DURATIONS);
+                govNotifyFailureClassifier, new AttachmentFailureClassifier(), LEGACY_EMAIL_RETRY_DURATIONS);
     }
 
     @Test
@@ -329,13 +341,13 @@ class SendEmailTaskTest {
         @ParameterizedTest
         @MethodSource("uk.gov.hmcts.cp.notification.task.SendEmailTaskTest#permanentMaterialFailures")
         void should_mark_failed_with_the_failure_status_and_complete_without_retry_when_the_material_download_fails_permanently(
-                final MaterialAttachmentException failure) {
+                final MaterialAttachmentException failure, final OutcomeReason outcomeReason) {
             final UUID id = UUID.randomUUID();
             when(materialAttachmentDownloader.download(MATERIAL_URL, id)).thenThrow(failure);
 
             final ExecutionInfo result = task.execute(sendEmailJob(id, "", MATERIAL_URL));
 
-            verify(statusService).markFailed(id, failure.getStatusCode(), failure.getMessage());
+            verify(statusService).markFailed(id, failure.getStatusCode(), failure.getMessage(), outcomeReason);
             verify(emailSender, never()).sendEmail(any(), any());
             verify(executionService, never()).executeWith(any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
@@ -346,11 +358,11 @@ class SendEmailTaskTest {
         void should_retry_when_the_material_download_fails_retryably() {
             final UUID id = UUID.randomUUID();
             when(materialAttachmentDownloader.download(MATERIAL_URL, id)).thenThrow(
-                    MaterialAttachmentException.retryable("Material did not return the document (HTTP 404)", 404));
+                    MaterialAttachmentException.retryable("Material did not return the document (HTTP 503)", 503));
 
             final ExecutionInfo result = task.execute(sendEmailJob(id, "", MATERIAL_URL));
 
-            verify(statusService, never()).markFailed(any(), any(), any());
+            verify(statusService, never()).markFailed(any(), any(), any(), any());
             verify(emailSender, never()).sendEmail(any(), any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
             assertThat(result.isShouldRetry()).isTrue();
@@ -360,11 +372,12 @@ class SendEmailTaskTest {
         void should_mark_failed_with_the_last_status_when_the_material_download_keeps_failing_until_retries_are_exhausted() {
             final UUID id = UUID.randomUUID();
             when(materialAttachmentDownloader.download(MATERIAL_URL, id)).thenThrow(
-                    MaterialAttachmentException.retryable("Material did not return the document (HTTP 403)", 403));
+                    MaterialAttachmentException.retryable("Material did not return the document (HTTP 502)", 502));
 
             final ExecutionInfo result = task.execute(sendEmailJobWithRetriesRemaining(id, "", MATERIAL_URL, 0));
 
-            verify(statusService).markFailed(id, 403, "Material attachment download did not recover within the retry window");
+            verify(statusService).markFailed(id, 502, "Material attachment download did not recover within the retry window",
+                    ATTACHMENT_UNAVAILABLE);
             verify(emailSender, never()).sendEmail(any(), any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
@@ -377,7 +390,8 @@ class SendEmailTaskTest {
 
             task.execute(sendEmailJobWithRetriesRemaining(id, "", MATERIAL_URL, 0));
 
-            verify(statusService).markFailed(id, null, "Material attachment download did not recover within the retry window");
+            verify(statusService).markFailed(id, null, "Material attachment download did not recover within the retry window",
+                    ATTACHMENT_UNAVAILABLE);
         }
 
         @Test
@@ -385,11 +399,11 @@ class SendEmailTaskTest {
             final UUID id = UUID.randomUUID();
             final String fileUri = "https://sa.blob.core.windows.net/mi-reportdata/missing.csv";
             when(attachmentDownloader.download(fileUri))
-                    .thenThrow(new PermanentBlobException("blob 404"));
+                    .thenThrow(new PermanentBlobException("blob 404", 404, null));
 
             final ExecutionInfo result = task.execute(sendEmailJob(id, fileUri));
 
-            verify(statusService).markFailed(eq(id), any(), any());
+            verify(statusService).markFailed(id, 404, "blob 404", ATTACHMENT_NOT_FOUND);
             verify(emailSender, never()).sendEmail(any(), any());
             verify(executionService, never()).executeWith(any());
 
@@ -405,7 +419,7 @@ class SendEmailTaskTest {
 
             final ExecutionInfo result = task.execute(sendEmailJob(id, fileUri));
 
-            verify(statusService, never()).markFailed(any(), any(), any());
+            verify(statusService, never()).markFailed(any(), any(), any(), any());
             verify(emailSender, never()).sendEmail(any(), any());
             verify(executionService, never()).executeWith(any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
@@ -422,7 +436,7 @@ class SendEmailTaskTest {
             final ExecutionInfo result = task.execute(sendEmailJobWithRetriesRemaining(id, fileUri, 0));
 
             verify(statusService).markFailed(eq(id), eq(503),
-                    eq("Attachment download did not recover within the retry window"));
+                    eq("Attachment download did not recover within the retry window"), eq(ATTACHMENT_UNAVAILABLE));
             verify(emailSender, never()).sendEmail(any(), any());
             verify(executionService, never()).executeWith(any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
@@ -436,7 +450,7 @@ class SendEmailTaskTest {
 
             final ExecutionInfo result = task.execute(sendEmailJob(id, ""));
 
-            verify(statusService).markFailed(eq(id), eq(400), eq("bad request"));
+            verify(statusService).markFailed(eq(id), eq(400), eq("bad request"), eq(PROVIDER_REJECTED));
             verify(executionService, never()).executeWith(any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
@@ -450,7 +464,8 @@ class SendEmailTaskTest {
 
             final ExecutionInfo result = task.execute(sendEmailJob(id, ""));
 
-            verify(statusService).markFailed(id, status, "Office 365 responded with 'Invalid request payload'");
+            verify(statusService).markFailed(id, status, "Office 365 responded with 'Invalid request payload'",
+                    PROVIDER_REJECTED);
             verify(executionService, never()).executeWith(any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
             assertThat(result.isShouldRetry()).isFalse();
@@ -464,7 +479,7 @@ class SendEmailTaskTest {
 
             final ExecutionInfo result = task.execute(sendEmailJob(id, ""));
 
-            verify(statusService).markFailed(id, null, "Office 365 request could not be built");
+            verify(statusService).markFailed(id, null, "Office 365 request could not be built", PROVIDER_REJECTED);
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
             assertThat(result.isShouldRetry()).isFalse();
         }
@@ -477,7 +492,7 @@ class SendEmailTaskTest {
 
             final ExecutionInfo result = task.execute(sendEmailJob(id, ""));
 
-            verify(statusService, never()).markFailed(any(), any(), any());
+            verify(statusService, never()).markFailed(any(), any(), any(), any());
             verify(statusService, never()).markSent(any(), any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
             assertThat(result.isShouldRetry()).isTrue();
@@ -491,7 +506,8 @@ class SendEmailTaskTest {
 
             final ExecutionInfo result = task.execute(sendEmailJobWithRetriesRemaining(id, "", 0));
 
-            verify(statusService).markFailed(id, 503, "Office 365 send did not recover within the retry window");
+            verify(statusService).markFailed(id, 503, "Office 365 send did not recover within the retry window",
+                    PROVIDER_FAILED);
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
 
@@ -503,7 +519,7 @@ class SendEmailTaskTest {
 
             final ExecutionInfo result = task.execute(sendEmailJob(id, ""));
 
-            verify(statusService, never()).markFailed(any(), any(), any());
+            verify(statusService, never()).markFailed(any(), any(), any(), any());
             verify(executionService, never()).executeWith(any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
             assertThat(result.isShouldRetry()).isTrue();
@@ -518,7 +534,7 @@ class SendEmailTaskTest {
             final ExecutionInfo result = task.execute(sendEmailJobWithRetriesRemaining(id, "", 0));
 
             verify(statusService).markFailed(eq(id), eq(500),
-                    eq("Gov.Notify send did not recover within the retry window"));
+                    eq("Gov.Notify send did not recover within the retry window"), eq(PROVIDER_FAILED));
             verify(executionService, never()).executeWith(any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
@@ -532,7 +548,7 @@ class SendEmailTaskTest {
 
             final ExecutionInfo result = task.execute(sendEmailJob(id, ""));
 
-            verify(statusService, never()).markFailed(any(), any(), any());
+            verify(statusService, never()).markFailed(any(), any(), any(), any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
             assertThat(result.isShouldRetry()).isTrue();
             verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), messageCaptor.capture());
@@ -558,7 +574,8 @@ class SendEmailTaskTest {
             final ExecutionInfo result = task.execute(sendEmailJobWithRetriesRemaining(id, "", 0));
 
             verify(statusService).markFailed(id, 0,
-                    "Gov.Notify send did not recover within the retry window: the service could not be reached");
+                    "Gov.Notify send did not recover within the retry window: the service could not be reached",
+                    PROVIDER_UNREACHABLE);
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
 
@@ -570,7 +587,7 @@ class SendEmailTaskTest {
 
             final ExecutionInfo result = task.execute(sendEmailJob(id, ""));
 
-            verify(statusService).markFailed(id, 0, "reference cannot be null or empty");
+            verify(statusService).markFailed(id, 0, "reference cannot be null or empty", PROVIDER_REJECTED);
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
 
@@ -640,15 +657,26 @@ class SendEmailTaskTest {
         return jobData.build();
     }
 
-    static Stream<MaterialAttachmentException> permanentMaterialFailures() {
+    static Stream<Arguments> permanentMaterialFailures() {
         return Stream.of(
-                MaterialAttachmentException.permanent("Material link is not on the Material service", null),
-                MaterialAttachmentException.permanent(
+                arguments(MaterialAttachmentException.permanent("Material link is not on the Material service", null),
+                        ATTACHMENT_BAD_LINK),
+                arguments(MaterialAttachmentException.permanent(
                         "Material returned a document link that is not an https Azure Blob Storage link", null),
-                MaterialAttachmentException.permanent("Material rejected the document request (HTTP 400)", 400),
-                MaterialAttachmentException.permanent("Material rejected the document request (HTTP 413)", 413),
-                MaterialAttachmentException.permanent(
-                        "The Material document exceeds the maximum attachment size of 15728640 bytes", 413));
+                        ATTACHMENT_BAD_LINK),
+                arguments(MaterialAttachmentException.permanent("Material rejected the document request (HTTP 400)", 400),
+                        ATTACHMENT_BAD_LINK),
+                arguments(MaterialAttachmentException.permanent("Material refused access to the document (HTTP 401)", 401),
+                        ATTACHMENT_ACCESS_REFUSED),
+                arguments(MaterialAttachmentException.permanent("Material refused access to the document (HTTP 403)", 403),
+                        ATTACHMENT_ACCESS_REFUSED),
+                arguments(MaterialAttachmentException.permanent("Material has no such document (HTTP 404)", 404),
+                        ATTACHMENT_NOT_FOUND),
+                arguments(MaterialAttachmentException.permanent("Material rejected the document request (HTTP 413)", 413),
+                        ATTACHMENT_TOO_LARGE),
+                arguments(MaterialAttachmentException.permanent(
+                        "The Material document exceeds the maximum attachment size of 15728640 bytes", 413),
+                        ATTACHMENT_TOO_LARGE));
     }
 
     private static BlobStorageException blobStorageException(final int statusCode) {

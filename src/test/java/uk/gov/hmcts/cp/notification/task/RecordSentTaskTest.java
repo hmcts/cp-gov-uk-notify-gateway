@@ -61,7 +61,7 @@ class RecordSentTaskTest {
 
         final ExecutionInfo result = task.execute(recordSentJob(retriesRemaining));
 
-        verify(statusService, never()).markFailed(any(), any(), any());
+        verify(statusService, never()).markFailed(any(), any(), any(), any());
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
         assertThat(result.isShouldRetry()).isTrue();
     }

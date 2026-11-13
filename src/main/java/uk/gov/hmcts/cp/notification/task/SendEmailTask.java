@@ -11,6 +11,7 @@ import static uk.gov.hmcts.cp.notification.logging.Dependency.MATERIAL;
 import static uk.gov.hmcts.cp.notification.logging.Dependency.MICROSOFT_365;
 import static uk.gov.hmcts.cp.notification.logging.Operation.DOWNLOAD;
 import static uk.gov.hmcts.cp.notification.logging.Operation.SEND;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_REJECTED;
 
 import com.azure.storage.blob.models.BlobStorageException;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,8 +22,10 @@ import tools.jackson.databind.ObjectMapper;
 import uk.gov.hmcts.cp.notification.blob.AttachmentDownloader;
 import uk.gov.hmcts.cp.notification.blob.PermanentBlobException;
 import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
+import uk.gov.hmcts.cp.notification.logging.AttachmentFailureClassifier;
 import uk.gov.hmcts.cp.notification.logging.DependencyCall;
 import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
+import uk.gov.hmcts.cp.notification.logging.OutcomeReason;
 import uk.gov.hmcts.cp.notification.material.MaterialAttachmentDownloader;
 import uk.gov.hmcts.cp.notification.material.MaterialAttachmentException;
 import uk.gov.hmcts.cp.notification.sender.Attachment;
@@ -54,6 +57,7 @@ public class SendEmailTask implements ExecutableTask {
     private final CpTaskFactory taskFactory;
     private final DependencyCallLogger dependencyCallLogger;
     private final GovNotifyFailureClassifier govNotifyFailureClassifier;
+    private final AttachmentFailureClassifier attachmentFailureClassifier;
     private final List<Long> retryDurationsSecs;
 
     public SendEmailTask(
@@ -66,6 +70,7 @@ public class SendEmailTask implements ExecutableTask {
             final CpTaskFactory taskFactory,
             final DependencyCallLogger dependencyCallLogger,
             final GovNotifyFailureClassifier govNotifyFailureClassifier,
+            final AttachmentFailureClassifier attachmentFailureClassifier,
             @Value("${cp.notification.retry.email-durations-secs}") final List<Long> retryDurationsSecs) {
         this.attachmentDownloader = attachmentDownloader;
         this.materialAttachmentDownloader = materialAttachmentDownloader;
@@ -76,6 +81,7 @@ public class SendEmailTask implements ExecutableTask {
         this.taskFactory = taskFactory;
         this.dependencyCallLogger = dependencyCallLogger;
         this.govNotifyFailureClassifier = govNotifyFailureClassifier;
+        this.attachmentFailureClassifier = attachmentFailureClassifier;
         this.retryDurationsSecs = retryDurationsSecs;
     }
 
@@ -94,8 +100,9 @@ public class SendEmailTask implements ExecutableTask {
             final String message = format(
                     "Permanent attachment failure for notification '%s' — marking FAILED, no retry", notificationId);
             dependencyCallLogger.warn(dependencyCall, message);
+            final OutcomeReason outcomeReason = attachmentFailureClassifier.classify(ofNullable(statusCode));
             result = failurePolicy.fail(command.notificationId(), permanentBlobException.getStatusCode(),
-                    permanentBlobException.getMessage(), executionInfo);
+                    permanentBlobException.getMessage(), outcomeReason, executionInfo);
         } catch (final BlobStorageException blobStorageException) {
             result = failurePolicy.retryOrFail(command.notificationId(), blobStorageException.getStatusCode(),
                     "Attachment download did not recover within the retry window", executionInfo,
@@ -125,8 +132,9 @@ public class SendEmailTask implements ExecutableTask {
                     "Permanent Material attachment failure for notification '%s' ('%s') — marking FAILED, no retry",
                     notificationId, failureMessage);
             dependencyCallLogger.warn(dependencyCall, message);
+            final OutcomeReason outcomeReason = attachmentFailureClassifier.classify(ofNullable(statusCode));
             result = failurePolicy.fail(command.notificationId(), materialAttachmentException.getStatusCode(),
-                    materialAttachmentException.getMessage(), executionInfo);
+                    materialAttachmentException.getMessage(), outcomeReason, executionInfo);
         }
         return result;
     }
@@ -170,7 +178,7 @@ public class SendEmailTask implements ExecutableTask {
                         notificationId, statusCode);
                 dependencyCallLogger.warn(dependencyCall, message);
                 result = failurePolicy.fail(command.notificationId(), govNotifyException.getHttpStatus(),
-                        govNotifyException.getMessage(), executionInfo);
+                        govNotifyException.getMessage(), PROVIDER_REJECTED, executionInfo);
             }
         }
         return result;
@@ -189,7 +197,7 @@ public class SendEmailTask implements ExecutableTask {
                     notificationId, statusCode);
             dependencyCallLogger.warn(dependencyCall, message);
             result = failurePolicy.fail(command.notificationId(), office365Exception.getHttpStatus(),
-                    office365Exception.getMessage(), executionInfo);
+                    office365Exception.getMessage(), PROVIDER_REJECTED, executionInfo);
         } else {
             result = failurePolicy.retryOrFail(command.notificationId(), office365Exception.getHttpStatus(),
                     "Office 365 send did not recover within the retry window", executionInfo,
