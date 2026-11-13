@@ -5,6 +5,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
+import uk.gov.hmcts.cp.notification.logging.Dependency;
+
 import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -39,6 +41,11 @@ public class Office365Client implements EmailClient {
         this.settings = settings;
         this.requestBodyFactory = requestBodyFactory;
         this.responseReader = responseReader;
+    }
+
+    @Override
+    public Dependency dependency() {
+        return Dependency.MICROSOFT_365;
     }
 
     @Override

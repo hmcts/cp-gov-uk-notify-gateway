@@ -12,6 +12,7 @@
                 <loggerName/>
                 <threadName/>
                 <logLevel/>
+                <keyValuePairs/>
                 <pattern>
                     <pattern>{"exception": "%xException{full}"}</pattern>
                 </pattern>

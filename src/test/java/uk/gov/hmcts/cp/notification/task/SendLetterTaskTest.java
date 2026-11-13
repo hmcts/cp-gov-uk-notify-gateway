@@ -7,21 +7,27 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import tools.jackson.databind.json.JsonMapper;
 
+import uk.gov.hmcts.cp.notification.logging.DependencyCall;
+import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
+import uk.gov.hmcts.cp.notification.logging.FailureReasonClassifier;
 import uk.gov.hmcts.cp.notification.material.MaterialAttachmentDownloader;
 import uk.gov.hmcts.cp.notification.material.MaterialAttachmentException;
 import uk.gov.hmcts.cp.notification.sender.Attachment;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyClient;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
+import uk.gov.hmcts.cp.notification.sender.GovNotifyFailureClassifier;
 import uk.gov.hmcts.cp.notification.service.NotificationStatusService;
 import uk.gov.hmcts.cp.notification.time.Clock;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionStatus;
 import uk.gov.hmcts.cp.taskmanager.service.ExecutionService;
 
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -29,9 +35,20 @@ import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.UUID;
 
+import static java.util.Optional.empty;
+import static java.util.Optional.of;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static uk.gov.hmcts.cp.notification.logging.CallOutcome.PERMANENT_FAILURE;
+import static uk.gov.hmcts.cp.notification.logging.CallOutcome.SUCCEEDED;
+import static uk.gov.hmcts.cp.notification.logging.CallOutcome.TRANSIENT_FAILURE;
+import static uk.gov.hmcts.cp.notification.logging.Channel.LETTER;
+import static uk.gov.hmcts.cp.notification.logging.Dependency.GOV_UK_NOTIFY;
+import static uk.gov.hmcts.cp.notification.logging.Dependency.MATERIAL;
+import static uk.gov.hmcts.cp.notification.logging.FailureReason.NO_RESPONSE;
+import static uk.gov.hmcts.cp.notification.logging.Operation.DOWNLOAD;
+import static uk.gov.hmcts.cp.notification.logging.Operation.SEND;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
@@ -56,6 +73,12 @@ class SendLetterTaskTest {
     private NotificationStatusService statusService;
     @Mock
     private ExecutionService executionService;
+    @Mock
+    private DependencyCallLogger dependencyCallLogger;
+    @Captor
+    private ArgumentCaptor<DependencyCall> dependencyCallCaptor;
+    @Captor
+    private ArgumentCaptor<String> messageCaptor;
 
     private final UUID notificationId = UUID.randomUUID();
 
@@ -64,9 +87,14 @@ class SendLetterTaskTest {
     @BeforeEach
     void createTaskWithLegacyLetterRetryDurations() {
         final Clock clock = new Clock(java.time.Clock.fixed(NOW, ZoneOffset.UTC));
+        final FailureReasonClassifier failureReasonClassifier = new FailureReasonClassifier();
+        final GovNotifyFailureClassifier govNotifyFailureClassifier =
+                new GovNotifyFailureClassifier(failureReasonClassifier);
         task = new SendLetterTask(materialAttachmentDownloader, govNotifyClient,
-                new TransientFailurePolicy(statusService, clock, List.of(1L)),
-                executionService, new CpTaskFactory(JsonMapper.builder().build(), clock), LEGACY_LETTER_RETRY_DURATIONS);
+                new TransientFailurePolicy(statusService, clock, dependencyCallLogger, failureReasonClassifier,
+                        List.of(1L)),
+                executionService, new CpTaskFactory(JsonMapper.builder().build(), clock), dependencyCallLogger,
+                govNotifyFailureClassifier, LEGACY_LETTER_RETRY_DURATIONS);
     }
 
     @Test
@@ -93,6 +121,25 @@ class SendLetterTaskTest {
             assertThat(LetterJob.from(next.getValue().getJobData()))
                     .isEqualTo(new LetterJob(notificationId, LETTER_URL, firstClass, 3));
             verifyNoInteractions(statusService);
+        }
+
+        @Test
+        void should_log_a_successful_letter_send_to_gov_uk_notify() {
+            aDownloadableLetter();
+            when(govNotifyClient.sendPrecompiledLetter(any(), any(), anyBoolean())).thenReturn(REFERENCE);
+
+            task.execute(sendLetterJob(false, 3));
+
+            verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), messageCaptor.capture());
+            final String message = messageCaptor.getValue();
+            assertThat(message).isEqualTo("Sent letter for notification '" + notificationId
+                    + "' via Gov.Notify (reference 'notify-letter-ref')");
+            final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
+            assertThat(dependencyCall.dependency()).isEqualTo(GOV_UK_NOTIFY);
+            assertThat(dependencyCall.operation()).isEqualTo(SEND);
+            assertThat(dependencyCall.channel()).isEqualTo(LETTER);
+            assertThat(dependencyCall.callOutcome()).isEqualTo(SUCCEEDED);
+            assertThat(dependencyCall.statusCode()).isEqualTo(empty());
         }
     }
 
@@ -140,6 +187,32 @@ class SendLetterTaskTest {
         }
 
         @Test
+        void should_retry_and_log_that_gov_uk_notify_did_not_respond_when_it_gives_no_http_response() {
+            aDownloadableLetter();
+            final SocketTimeoutException socketTimeoutException = new SocketTimeoutException("Read timed out");
+            when(govNotifyClient.sendPrecompiledLetter(any(), any(), anyBoolean()))
+                    .thenThrow(new GovNotifyException(
+                            0, "java.net.SocketTimeoutException: Read timed out", socketTimeoutException));
+
+            final ExecutionInfo result = task.execute(sendLetterJob(false, 5));
+
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
+            assertThat(result.isShouldRetry()).isTrue();
+            verifyNoInteractions(statusService, executionService);
+            verify(dependencyCallLogger).info(dependencyCallCaptor.capture(), messageCaptor.capture());
+            final String message = messageCaptor.getValue();
+            assertThat(message).isEqualTo("Transient failure 'invoking the Gov.Notify send API' for notificationId '"
+                    + notificationId + "' (the service did not respond) — will retry");
+            final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
+            assertThat(dependencyCall.dependency()).isEqualTo(GOV_UK_NOTIFY);
+            assertThat(dependencyCall.operation()).isEqualTo(SEND);
+            assertThat(dependencyCall.channel()).isEqualTo(LETTER);
+            assertThat(dependencyCall.callOutcome()).isEqualTo(TRANSIENT_FAILURE);
+            assertThat(dependencyCall.statusCode()).isEqualTo(empty());
+            assertThat(dependencyCall.failureReason()).isEqualTo(of(NO_RESPONSE));
+        }
+
+        @Test
         void should_mark_failed_without_retry_when_gov_notify_rejects_the_letter_as_a_bad_request() {
             aDownloadableLetter();
             when(govNotifyClient.sendPrecompiledLetter(any(), any(), anyBoolean()))
@@ -150,6 +223,26 @@ class SendLetterTaskTest {
             verify(statusService).markFailed(notificationId, 400, "precompiledPDF must be a valid PDF file");
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
             verifyNoInteractions(executionService);
+        }
+
+        @Test
+        void should_log_a_permanent_gov_uk_notify_letter_send_failure() {
+            aDownloadableLetter();
+            when(govNotifyClient.sendPrecompiledLetter(any(), any(), anyBoolean()))
+                    .thenThrow(new GovNotifyException(400, "precompiledPDF must be a valid PDF file", null));
+
+            task.execute(sendLetterJob(false, 5));
+
+            verify(dependencyCallLogger).warn(dependencyCallCaptor.capture(), messageCaptor.capture());
+            final String message = messageCaptor.getValue();
+            assertThat(message).isEqualTo("Permanent letter send failure for notification '" + notificationId
+                    + "' (http '400') — marking FAILED");
+            final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
+            assertThat(dependencyCall.dependency()).isEqualTo(GOV_UK_NOTIFY);
+            assertThat(dependencyCall.operation()).isEqualTo(SEND);
+            assertThat(dependencyCall.channel()).isEqualTo(LETTER);
+            assertThat(dependencyCall.callOutcome()).isEqualTo(PERMANENT_FAILURE);
+            assertThat(dependencyCall.statusCode()).isEqualTo(of(400));
         }
     }
 
@@ -191,6 +284,25 @@ class SendLetterTaskTest {
                     eq("Material link is not on the Material service"));
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
             verify(govNotifyClient, never()).sendPrecompiledLetter(any(), any(), anyBoolean());
+        }
+
+        @Test
+        void should_log_a_permanent_material_letter_download_failure_with_no_status_code() {
+            when(materialAttachmentDownloader.download(LETTER_URL, notificationId))
+                    .thenThrow(MaterialAttachmentException.permanent("Material link is not on the Material service", null));
+
+            task.execute(sendLetterJob(false, 5));
+
+            verify(dependencyCallLogger).warn(dependencyCallCaptor.capture(), messageCaptor.capture());
+            final String message = messageCaptor.getValue();
+            assertThat(message).isEqualTo("Permanent Material letter download failure for notification '"
+                    + notificationId + "' ('Material link is not on the Material service') — marking FAILED, no retry");
+            final DependencyCall dependencyCall = dependencyCallCaptor.getValue();
+            assertThat(dependencyCall.dependency()).isEqualTo(MATERIAL);
+            assertThat(dependencyCall.operation()).isEqualTo(DOWNLOAD);
+            assertThat(dependencyCall.channel()).isEqualTo(LETTER);
+            assertThat(dependencyCall.callOutcome()).isEqualTo(PERMANENT_FAILURE);
+            assertThat(dependencyCall.statusCode()).isEqualTo(empty());
         }
     }
 

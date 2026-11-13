@@ -9,8 +9,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
+import uk.gov.hmcts.cp.notification.logging.FailureReasonClassifier;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyClient;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
+import uk.gov.hmcts.cp.notification.sender.GovNotifyFailureClassifier;
 import uk.gov.hmcts.cp.notification.sender.NotificationStatus;
 import uk.gov.hmcts.cp.notification.service.NotificationEmailDetails;
 import uk.gov.hmcts.cp.notification.service.NotificationStatusService;
@@ -18,6 +21,7 @@ import uk.gov.hmcts.cp.notification.time.Clock;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionStatus;
 
+import java.net.ConnectException;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.List;
@@ -45,10 +49,14 @@ class CheckEmailStatusTaskTest {
     private CheckEmailStatusTask task;
 
     @BeforeEach
-    void setUp() {
+    void createTaskWithLegacyEmailRetryDurations() {
+        final FailureReasonClassifier failureReasonClassifier = new FailureReasonClassifier();
+        final GovNotifyFailureClassifier govNotifyFailureClassifier =
+                new GovNotifyFailureClassifier(failureReasonClassifier);
         task = new CheckEmailStatusTask(govNotifyClient, statusService,
-                new TransientFailurePolicy(statusService, new Clock(), LEGACY_EMAIL_RETRY_DURATIONS),
-                LEGACY_EMAIL_RETRY_DURATIONS);
+                new TransientFailurePolicy(statusService, new Clock(), new DependencyCallLogger(),
+                        failureReasonClassifier, LEGACY_EMAIL_RETRY_DURATIONS),
+                govNotifyFailureClassifier, LEGACY_EMAIL_RETRY_DURATIONS);
     }
 
     @Test
@@ -157,6 +165,36 @@ class CheckEmailStatusTaskTest {
             verify(statusService).markFailed(eq(id), eq(500),
                     eq("Gov.Notify status polling did not recover within the retry window"));
             verify(statusService, never()).markSent(any(), any());
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
+        }
+
+        @Test
+        void should_re_poll_when_gov_uk_notify_cannot_be_reached() {
+            final UUID id = UUID.randomUUID();
+            final String reference = "notify-ref-123";
+            final ConnectException connectException = new ConnectException("Connection refused");
+            when(govNotifyClient.checkStatus(reference))
+                    .thenThrow(new GovNotifyException(0, "java.net.ConnectException: Connection refused", connectException));
+
+            final ExecutionInfo result = task.execute(checkStatusJob(id, reference));
+
+            verifyNoInteractions(statusService);
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
+            assertThat(result.isShouldRetry()).isTrue();
+        }
+
+        @Test
+        void should_mark_failed_saying_gov_uk_notify_could_not_be_reached_when_retries_are_exhausted() {
+            final UUID id = UUID.randomUUID();
+            final String reference = "notify-ref-123";
+            final ConnectException connectException = new ConnectException("Connection refused");
+            when(govNotifyClient.checkStatus(reference))
+                    .thenThrow(new GovNotifyException(0, "java.net.ConnectException: Connection refused", connectException));
+
+            final ExecutionInfo result = task.execute(checkStatusJobWithRetriesRemaining(id, reference, 0));
+
+            verify(statusService).markFailed(id, 0,
+                    "Gov.Notify status polling did not recover within the retry window: the service could not be reached");
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
 

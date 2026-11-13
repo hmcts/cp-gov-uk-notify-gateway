@@ -2,6 +2,8 @@ package uk.gov.hmcts.cp.notification.sender;
 
 import org.springframework.stereotype.Component;
 
+import uk.gov.hmcts.cp.notification.logging.Dependency;
+
 import uk.gov.service.notify.LetterResponse;
 import uk.gov.service.notify.Notification;
 import uk.gov.service.notify.NotificationClient;
@@ -23,6 +25,11 @@ public class GovNotifyClient implements EmailClient {
 
     public GovNotifyClient(final NotificationClient notificationClient) {
         this.notificationClient = notificationClient;
+    }
+
+    @Override
+    public Dependency dependency() {
+        return Dependency.GOV_UK_NOTIFY;
     }
 
     @Override

@@ -80,7 +80,7 @@ Not deviations (legacy parity is kept, only the implementation differs): retry e
 | `404` `NoResultFound` (unknown id, or past the 7-day retention) | temporary — retried, then FAILED | **permanent — FAILED at once** | **yes** |
 | `401`, `403` | temporary | temporary | no (kept on purpose) |
 | `429`, `5xx`, any other HTTP status | temporary | temporary | no |
-| non-HTTP error (status `0`) | permanent | permanent, **except `SSLHandshakeException`, which is retried** | **yes** |
+| non-HTTP error (status `0`) | permanent | **temporary when caused by an I/O failure** (the service could not be reached or did not respond, PEG-3720); otherwise permanent | **yes** |
 
 Legacy lists the **failure** statuses and treats everything else as in progress; NG lists the **in-progress**
 statuses and treats everything else as a failure (`Gov.Notify responded with status '<status>'`).
@@ -346,8 +346,8 @@ re-poll to succeed, so the gateway fails both at once.
 `GovNotifyFailureClassifier.isTemporary`. **Permanent** (FAILED at once): `400`, `413`, and `404`
 `NoResultFound`. Notify returns `404` for an unknown id **or** a message outside the retention period
 ("The default retention period is 7 days"; "If it's outside the retention period, you may no longer
-get the status of the message"). A non-HTTP error is permanent unless it is an
-`SSLHandshakeException`. **Temporary** (retried on the configured durations, then FAILED): everything
+get the status of the message"). A non-HTTP error is temporary when an I/O failure caused it (the
+service could not be reached or did not respond, PEG-3720), and permanent otherwise. **Temporary** (retried on the configured durations, then FAILED): everything
 else, including `401`, `403`, `429` and `5xx`.
 
 **404 is classified permanent in `GovNotifyFailureClassifier`, not just here.** A `NoResultFound`
