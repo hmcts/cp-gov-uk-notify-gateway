@@ -35,6 +35,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.DELIVERY_FAILED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_FAILED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_REJECTED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_UNREACHABLE;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.STATUS_UNKNOWN;
 
 @ExtendWith(MockitoExtension.class)
 class CheckEmailStatusTaskTest {
@@ -102,7 +107,7 @@ class CheckEmailStatusTaskTest {
             final ExecutionInfo result = task.execute(checkStatusJob(id, reference));
 
             verify(statusService).markFailed(eq(id), isNull(),
-                    eq("Gov.Notify responded with status 'permanent-failure'"));
+                    eq("Gov.Notify responded with status 'permanent-failure'"), eq(DELIVERY_FAILED));
             verify(statusService, never()).markSent(any(), any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
@@ -116,7 +121,7 @@ class CheckEmailStatusTaskTest {
             final ExecutionInfo result = task.execute(checkStatusJob(id, reference));
 
             verify(statusService).markFailed(eq(id), isNull(),
-                    eq("Gov.Notify responded with status 'temporary-failure'"));
+                    eq("Gov.Notify responded with status 'temporary-failure'"), eq(DELIVERY_FAILED));
             verify(statusService, never()).markSent(any(), any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
@@ -130,7 +135,8 @@ class CheckEmailStatusTaskTest {
             final ExecutionInfo result = task.execute(checkStatusJobWithRetriesRemaining(id, reference, 0));
 
             verify(statusService).markFailed(eq(id), isNull(),
-                    eq("Gov.Notify did not reach a terminal status within the retry window (last status 'sending')"));
+                    eq("Gov.Notify did not reach a terminal status within the retry window (last status 'sending')"),
+                    eq(STATUS_UNKNOWN));
             verify(statusService, never()).markSent(any(), any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
@@ -163,7 +169,7 @@ class CheckEmailStatusTaskTest {
             final ExecutionInfo result = task.execute(checkStatusJobWithRetriesRemaining(id, reference, 0));
 
             verify(statusService).markFailed(eq(id), eq(500),
-                    eq("Gov.Notify status polling did not recover within the retry window"));
+                    eq("Gov.Notify status polling did not recover within the retry window"), eq(PROVIDER_FAILED));
             verify(statusService, never()).markSent(any(), any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
@@ -194,7 +200,8 @@ class CheckEmailStatusTaskTest {
             final ExecutionInfo result = task.execute(checkStatusJobWithRetriesRemaining(id, reference, 0));
 
             verify(statusService).markFailed(id, 0,
-                    "Gov.Notify status polling did not recover within the retry window: the service could not be reached");
+                    "Gov.Notify status polling did not recover within the retry window: the service could not be reached",
+                    PROVIDER_UNREACHABLE);
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
 
@@ -207,7 +214,7 @@ class CheckEmailStatusTaskTest {
 
             final ExecutionInfo result = task.execute(checkStatusJob(id, reference));
 
-            verify(statusService).markFailed(id, 400, "bad request");
+            verify(statusService).markFailed(id, 400, "bad request", PROVIDER_REJECTED);
             verify(statusService, never()).markSent(any(), any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }

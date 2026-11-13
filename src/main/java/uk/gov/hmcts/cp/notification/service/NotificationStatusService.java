@@ -1,5 +1,8 @@
 package uk.gov.hmcts.cp.notification.service;
 
+import static java.lang.String.format;
+import static uk.gov.hmcts.cp.notification.logging.NotificationOutcome.FAILED;
+
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -7,6 +10,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import uk.gov.hmcts.cp.notification.logging.Channel;
+import uk.gov.hmcts.cp.notification.logging.NotificationOutcomeEvent;
+import uk.gov.hmcts.cp.notification.logging.NotificationOutcomeLogger;
+import uk.gov.hmcts.cp.notification.logging.OutcomeReason;
 import uk.gov.hmcts.cp.notification.persistence.NotificationEntity;
 import uk.gov.hmcts.cp.notification.persistence.NotificationRepository;
 import uk.gov.hmcts.cp.notification.result.NotificationFailedEvent;
@@ -29,6 +36,7 @@ public class NotificationStatusService {
     private final NotificationRepository notificationRepository;
     private final Clock clock;
     private final ResultEventPublisher resultEventPublisher;
+    private final NotificationOutcomeLogger notificationOutcomeLogger;
 
     @Transactional
     public void markSent(final UUID notificationId, final NotificationEmailDetails emailDetails) {
@@ -88,8 +96,14 @@ public class NotificationStatusService {
         LOG.info("Letter notification {} marked REQUEUED", notificationId);
     }
 
+    /**
+     * Marks the notification FAILED and tells the originator. Then logs the failure with the reply queue and
+     * {@code outcomeReason}, so that an alert can tell the team that owns the reply queue (PEG-3718, PEG-3719).
+     */
     @Transactional
-    public void markFailed(final UUID notificationId, final Integer statusCode, final String errorMessage) {
+    public void markFailed(
+            final UUID notificationId, final Integer statusCode, final String errorMessage,
+            final OutcomeReason outcomeReason) {
         final NotificationEntity notification = getById(notificationId);
         notification.setStatus(STATUS_FAILED);
         notification.setStatusCode(statusCode);
@@ -98,6 +112,21 @@ public class NotificationStatusService {
         notificationRepository.save(notification);
         LOG.warn("Notification {} marked FAILED (statusCode={})", notificationId, statusCode);
         publishFailed(notification);
+        logFailure(notification, outcomeReason);
+    }
+
+    private void logFailure(final NotificationEntity notification, final OutcomeReason outcomeReason) {
+        // notification_type is stored as EMAIL or LETTER, the names of the Channel constants.
+        final String notificationType = notification.getNotificationType();
+        final Channel channel = Channel.valueOf(notificationType);
+        final String replyQueue = notification.getResultQueue();
+        final NotificationOutcomeEvent notificationOutcomeEvent =
+                new NotificationOutcomeEvent(FAILED, outcomeReason, channel, replyQueue);
+        final UUID notificationId = notification.getNotificationId();
+        final String reasonDescription = outcomeReason.getDescription();
+        final String message = format("Notification '%s' for reply queue '%s' failed: %s",
+                notificationId, replyQueue, reasonDescription);
+        notificationOutcomeLogger.warn(notificationOutcomeEvent, message);
     }
 
     private static NotificationSentEvent.NotificationSentEventBuilder sentEvent(final NotificationEntity notification) {

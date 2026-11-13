@@ -1,5 +1,7 @@
 package uk.gov.hmcts.cp.notification.messaging;
 
+import static uk.gov.hmcts.cp.notification.logging.Channel.LETTER;
+
 import com.azure.messaging.servicebus.ServiceBusErrorContext;
 import com.azure.messaging.servicebus.ServiceBusReceivedMessageContext;
 import lombok.RequiredArgsConstructor;
@@ -23,7 +25,7 @@ public class SendLetterConsumer {
     private final NotificationIngestionService ingestionService;
 
     public void processMessage(final ServiceBusReceivedMessageContext context) {
-        processor.process(context, SendLetterCommand.class, ingestionService::ingest);
+        processor.process(context, SendLetterCommand.class, LETTER, ingestionService::ingest);
     }
 
     public void processError(final ServiceBusErrorContext context) {

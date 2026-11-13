@@ -1,8 +1,17 @@
 package uk.gov.hmcts.cp.notification.task;
 
 import static java.lang.String.format;
+import static java.util.Optional.of;
 import static java.util.Optional.ofNullable;
 import static uk.gov.hmcts.cp.notification.logging.CallOutcome.TRANSIENT_FAILURE;
+import static uk.gov.hmcts.cp.notification.logging.FailureReason.NO_RESPONSE;
+import static uk.gov.hmcts.cp.notification.logging.FailureReason.UNREACHABLE;
+import static uk.gov.hmcts.cp.notification.logging.Operation.DOWNLOAD;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_UNAVAILABLE;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_FAILED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_NO_RESPONSE;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_UNREACHABLE;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.STATUS_UNKNOWN;
 import static uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo.executionInfo;
 import static uk.gov.hmcts.cp.taskmanager.domain.ExecutionStatus.COMPLETED;
 import static uk.gov.hmcts.cp.taskmanager.domain.ExecutionStatus.INPROGRESS;
@@ -22,6 +31,7 @@ import uk.gov.hmcts.cp.notification.logging.DependencyCallLogger;
 import uk.gov.hmcts.cp.notification.logging.FailureReason;
 import uk.gov.hmcts.cp.notification.logging.FailureReasonClassifier;
 import uk.gov.hmcts.cp.notification.logging.Operation;
+import uk.gov.hmcts.cp.notification.logging.OutcomeReason;
 import uk.gov.hmcts.cp.notification.service.NotificationStatusService;
 import uk.gov.hmcts.cp.notification.time.Clock;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
@@ -47,6 +57,11 @@ import java.util.UUID;
  * be reached, or did not respond), and the reason is added to the FAILED reason once retries run out (PEG-3720).
  * Polling Gov.Notify for a notification still in progress is not a failure, so it has its own
  * {@link #pollAgainOrFail} with the same retry schedule.
+ *
+ * <p>Every FAILED status is recorded with an {@link OutcomeReason}, which is logged with the reply queue so that the
+ * team that owns it can be alerted (PEG-3718, PEG-3719). Once retries run out, a download is
+ * {@code attachment-unavailable}; a send or status check is {@code provider-unreachable} or
+ * {@code provider-no-response} when the {@link FailureReason} says so, and otherwise {@code provider-failed}.
  */
 @Component
 public class TransientFailurePolicy {
@@ -141,7 +156,8 @@ public class TransientFailurePolicy {
                     + " after exhausting retries — marking FAILED", retryCauseDescription, notificationId, failureDetail);
             dependencyCallLogger.warn(dependencyCall, message);
             final String failedReason = failedReasonOf(exhaustedReason, dependencyCall);
-            result = fail(notificationId, statusCode, failedReason, executionInfo);
+            final OutcomeReason outcomeReason = outcomeReasonOf(operation, failureReason);
+            result = fail(notificationId, statusCode, failedReason, outcomeReason, executionInfo);
         } else if (isLastRetry(executionInfo)) {
             final String message = format("Transient failure '%s' for notificationId '%s' (%s) — scheduling the final"
                     + " attempt", retryCauseDescription, notificationId, failureDetail);
@@ -178,7 +194,7 @@ public class TransientFailurePolicy {
         if (retriesExhausted(executionInfo)) {
             LOG.warn("Notification {} still in progress at Gov.Notify after exhausting status polls"
                     + " — marking FAILED", notificationId);
-            result = fail(notificationId, null, exhaustedReason, executionInfo);
+            result = fail(notificationId, null, exhaustedReason, STATUS_UNKNOWN, executionInfo);
         } else if (isLastRetry(executionInfo)) {
             LOG.info("Notification {} still in progress at Gov.Notify — scheduling the final status poll",
                     notificationId);
@@ -191,14 +207,16 @@ public class TransientFailurePolicy {
     }
 
     /**
-     * Handle a permanent failure: record FAILED immediately and complete, with no retry.
+     * Handle a permanent failure: record FAILED immediately, with the {@code outcomeReason} the requesting team is
+     * alerted with, and complete, with no retry.
      */
     public ExecutionInfo fail(
             final UUID notificationId,
             final Integer statusCode,
             final String reason,
+            final OutcomeReason outcomeReason,
             final ExecutionInfo executionInfo) {
-        statusService.markFailed(notificationId, statusCode, reason);
+        statusService.markFailed(notificationId, statusCode, reason, outcomeReason);
         return completed(executionInfo);
     }
 
@@ -232,6 +250,20 @@ public class TransientFailurePolicy {
             failureDetail = "no status code";
         }
         return failureDetail;
+    }
+
+    private OutcomeReason outcomeReasonOf(final Operation operation, final Optional<FailureReason> failureReason) {
+        final OutcomeReason outcomeReason;
+        if (operation == DOWNLOAD) {
+            outcomeReason = ATTACHMENT_UNAVAILABLE;
+        } else if (failureReason.equals(of(UNREACHABLE))) {
+            outcomeReason = PROVIDER_UNREACHABLE;
+        } else if (failureReason.equals(of(NO_RESPONSE))) {
+            outcomeReason = PROVIDER_NO_RESPONSE;
+        } else {
+            outcomeReason = PROVIDER_FAILED;
+        }
+        return outcomeReason;
     }
 
     private String failedReasonOf(final String exhaustedReason, final DependencyCall dependencyCall) {

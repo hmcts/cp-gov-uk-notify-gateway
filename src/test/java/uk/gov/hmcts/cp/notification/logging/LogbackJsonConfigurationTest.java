@@ -29,12 +29,14 @@ import static uk.gov.hmcts.cp.notification.logging.CapturedLogs.captureLogsOf;
 import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
 import static uk.gov.hmcts.cp.notification.logging.Dependency.GOV_UK_NOTIFY;
 import static uk.gov.hmcts.cp.notification.logging.FailureReason.NO_RESPONSE;
+import static uk.gov.hmcts.cp.notification.logging.NotificationOutcome.FAILED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_ACCESS_REFUSED;
 import static uk.gov.hmcts.cp.notification.logging.Operation.SEND;
 
 /**
  * Encodes a {@link DependencyCallLogger} log line with the encoder from the production {@code logback.xml} and checks
  * that the dependency call's fields come out as top-level JSON fields, which is what the Log Analytics alert queries
- * read (PEG-3720).
+ * read (PEG-3720). Does the same for a {@link NotificationOutcomeLogger} line (PEG-3718, PEG-3719).
  */
 class LogbackJsonConfigurationTest {
     private final String notificationId = "7c6a0f4e-0d0e-4c43-9a49-5bd2b4a0a1b2";
@@ -91,6 +93,30 @@ class LogbackJsonConfigurationTest {
         assertThat(jsonFields.get("outcome")).isEqualTo("transient-failure");
         assertThat(jsonFields.get("reason")).isEqualTo("no-response");
         assertThat(jsonFields.containsKey("statusCode")).isFalse();
+    }
+
+    @Test
+    void writes_the_notification_outcome_fields_as_top_level_json_fields() {
+        final NotificationOutcomeEvent notificationOutcomeEvent =
+                new NotificationOutcomeEvent(FAILED, ATTACHMENT_ACCESS_REFUSED, EMAIL, "sjp-notification-result");
+        final NotificationOutcomeLogger notificationOutcomeLogger = new NotificationOutcomeLogger();
+        final ILoggingEvent loggingEvent;
+        try (CapturedLogs capturedLogs = captureLogsOf(NotificationOutcomeLogger.class)) {
+            notificationOutcomeLogger.warn(notificationOutcomeEvent, "Notification '" + notificationId + "' failed");
+            final List<ILoggingEvent> loggingEvents = capturedLogs.events();
+            loggingEvent = loggingEvents.getFirst();
+        }
+
+        final Map<String, Object> jsonFields = jsonFieldsOf(loggingEvent);
+
+        assertThat(jsonFields.get("message")).isEqualTo("Notification '" + notificationId + "' failed");
+        assertThat(jsonFields.get("level")).isEqualTo("WARN");
+        assertThat(jsonFields.get("replyQueue")).isEqualTo("sjp-notification-result");
+        assertThat(jsonFields.get("notificationOutcome")).isEqualTo("failed");
+        assertThat(jsonFields.get("outcomeReason")).isEqualTo("attachment-access-refused");
+        assertThat(jsonFields.get("notificationChannel")).isEqualTo("email");
+        assertThat(jsonFields.containsKey("outcome")).isFalse();
+        assertThat(jsonFields.containsKey("reason")).isFalse();
     }
 
     private ILoggingEvent loggedEventOf(final DependencyCall dependencyCall) {

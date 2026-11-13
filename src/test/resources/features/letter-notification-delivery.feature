@@ -13,7 +13,8 @@ Feature: Letter notification delivery
   returns the outcome to it as a result event. A command that cannot be read
   or fails validation is rejected and the reason returned to the originator; a command without a
   reply queue is set aside unprocessed, because its outcome could not be
-  returned.
+  returned. Every rejected or failed notification is logged with its reply
+  queue and a reason, so that the team that owns the queue can be alerted.
 
   Background:
     Given the originator provides a reply queue
@@ -103,8 +104,10 @@ Feature: Letter notification delivery
     Given a send-letter-notification command for a letter whose Material document stays unavailable
     When the gateway processes the command
     Then the notification is recorded as FAILED
+    And the Material service is asked for the document again on each retry
     And no letter is sent via the Gov.UK Notify provider
     And a notification-failed result event for the letter with status 500 is published to the originator's reply queue
+    And the failure is logged for the originator's reply queue as "attachment-unavailable"
 
   @regression
   Scenario: A letter whose document is briefly unavailable is sent once it becomes available

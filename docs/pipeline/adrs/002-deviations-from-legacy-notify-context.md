@@ -37,13 +37,14 @@ The two framework swaps that drive most deviations:
 | [D12](#d12-letter-status-polling) | Letter status polling | Fails only `technical-failure`, `permanent-failure`, `virus-scan-failed`; re-polls every other status | Re-polls only in-flight statuses; every other status fails at once | Yes | No |
 | [D13](#d13-result-events) | Result events | `public.notificationnotify.events.notification-sent` / `-failed`, published to the **public event topic** for any subscriber | `notification-sent` / `notification-failed`, sent to the requester's **`ReplyTo` queue** only | Yes | Yes |
 | [D14](#d14-request-validation-rejection) | Request validation rejection | Invalid request rejected synchronously by the REST command API with `400`; nothing queued | Request that cannot be read or fails validation answered with a **`notification-validation-failed`** event to `ReplyTo`; a message **without a `ReplyTo`** dead-lettered | Yes — consequence of D1 | Yes |
+| [D15](#d15-material-attachments-that-can-never-be-fetched) | Material attachments that can never be fetched | Material and SAS `401`, `403`, `404` retried until the retry window ends, then failed | Failed at once, with a message saying whether access was refused or the document was not found | Yes | No |
 
 **Client impact** is **Yes** when a calling context must change its integration (transport, queue, field name or meaning, permissions, result-event name or delivery); **No** when the difference is internal to NG and the request and result contract are unchanged. What each client must do: [NG client onboarding](../../client-onboarding.md).
 
 Not deviations (legacy parity is kept, only the implementation differs): retry exhaustion
 ([Retry exhaustion implementation](#retry-exhaustion-implementation)), the Material document upload
 (`prepareUpload(bytes, filename)`), the [Material system user](#material-system-user) and
-[Material and SAS failure classification](#material-and-sas-failure-classification).
+[Material and SAS failure classification](#material-and-sas-failure-classification), apart from D15.
 
 ## Deviation details
 
@@ -233,6 +234,13 @@ The only behaviour change from moving ingress from REST to Service Bus (D1, D11)
 - **Why / risk:** a queue has no synchronous response, so the `400` becomes an event on the caller's reply queue, for a payload NG cannot read as well as one that fails validation. That needs the reply queue, so `ReplyTo` is now required: a message without one is dead-lettered before it is read, because neither a rejection nor a delivery outcome could be returned (before this change such a message was processed and its results dropped silently). Rejection runs entirely before ingestion, so a rejected command never opens a database transaction: the `ReplyTo` check, parsing and validation happen in the consumer, and the first database access is `NotificationIngestionService.ingest` (`@Transactional`), reached only by a valid command. If the event cannot be sent, the message is abandoned like any other transient failure: Service Bus redelivers it and dead-letters it at the queue's max delivery count, so no separate in-process retry is needed. A dead-lettered command can be told apart by its reason: `MissingReplyTo` (set by NG) or `MaxDeliveryCountExceeded` (set by Service Bus). Callers should still validate against `command-send-*-notification.schema.json` before sending, and the DLQ count of `ng-send-email` / `ng-send-letter` must be watched.
 - **References:** `messaging/SendEmailConsumer.java`, `messaging/SendLetterConsumer.java`, `messaging/CommandMessageProcessor.java`, `messaging/ValidationFailureNotifier.java`, `result/NotificationValidationFailedEvent.java`, `contracts/notification-validation-failed.schema.json`, `contracts/command-send-email-notification.schema.json`, `contracts/command-send-letter-notification.schema.json`; legacy `notificationnotify-command-api.raml`.
 
+### D15. Material attachments that can never be fetched
+
+- **Legacy:** Material `403` and `404`, and any SAS non-`200`, are retried until the retry window ends, then the notification fails.
+- **NG:** Material `401`, `403` and `404`, and SAS `401`, `403` and `404`, fail the notification at once, with a message that says which: "Material refused access to the document (HTTP 403)", "Material has no such document (HTTP 404)", "Access to the Material document was refused (HTTP 403)", "The Material document was not found (HTTP 404)". Other statuses and network failures are still retried.
+- **Why / risk:** agreed on PEG-3719 that a bad link or refused access is an unreadable attachment that should be reported straight away, while a network problem is still retried. Retrying a refusal or a missing document cannot succeed and only delays the failure the requesting team needs to act on. Risk: a document Material has not finished storing could return `404` and now fails at once instead of on a later retry; the `notification-failed` event and the team alert say so, and the requester can send again.
+- **References:** `material/MaterialClient.java`, `material/SasDocumentFetcher.java`, `logging/AttachmentFailureClassifier.java`.
+
 ## Material and SAS failure classification
 
 **Material and SAS failures** (legacy `EmailMaterialDownloader` + `FailureSelector`, NG `MaterialAttachmentException.retryable`):
@@ -242,15 +250,17 @@ The only behaviour change from moving ingress from REST to Service Bus (D1, D11)
 | `materialUrl` not on the Material host (D7) | fetched as given | **permanent, no HTTP call** |
 | SAS link not `https` Azure Blob (D8) | opened as given | **permanent, no HTTP call** |
 | Material `400`, `413` | permanent | permanent |
-| Material `403`, `404`, `5xx`, any other non-200 | retried | retried |
+| Material `401`, `403`, `404` | retried | **permanent (D15)** |
+| Material `5xx`, any other non-200 | retried | retried |
 | Material `200` without `Location` or `filename=` | unhandled exception escapes the task; the job is picked up again once its lock is an hour old, so it re-runs every hour and stays `QUEUED` | **retried, then FAILED** |
 | Material timeout, I/O error, interrupt | retried | retried |
-| SAS `400`, `403`, `404`, `5xx`, any other non-200 | retried (`IOException`) | retried |
+| SAS `401`, `403`, `404` | retried (`IOException`) | **permanent (D15)** |
+| SAS `400`, `5xx`, any other non-200 | retried (`IOException`) | retried |
 | SAS redirect | followed | **not followed — retried** |
 | SAS timeout, I/O error, interrupt | retried | retried |
 | Document over 15 MB | permanent, after downloading the whole file | permanent, **stops reading early** |
 
-Every status legacy classified is handled the same way. The refusals are the new controls of D7 and D8. The
+Every status legacy classified is handled the same way, apart from the `401`, `403` and `404` rows (D15). The refusals are the new controls of D7 and D8. The
 Material `200` row is not a deviation either: legacy's hourly re-run comes from an unhandled exception, and NG
 applies legacy's designed rule (retry on the configured durations, then FAIL) to it, as for retry exhaustion. When there is no HTTP
 response, `notification-failed` omits `statusCode` where legacy sent `999`; the only consumer that reads it
@@ -258,7 +268,7 @@ response, `notification-failed` omits `statusCode` where legacy sent `999`; the 
 with the last status ([Retry exhaustion implementation](#retry-exhaustion-implementation)).
 
 - **Logging:** each failed stage writes one log line with stage, outcome, status and the exception **message only** (never the throwable, the Material host, the base URL, the system user or the SAS query).
-- **Why / risk:** Same outcome as legacy for Material `400`/`413`, Material `403`/`404`/`5xx`, every SAS non-200 (including `400`, retried as legacy did) and over-size documents. Differences: (1) refused links, rejected SAS links, redirects and timeouts are new controls, so they have no legacy equivalent; (2) a `200` without `Location` or filename is retried and then FAILED, where legacy left the task to an unhandled exception that re-runs the job every hour; (3) the 15 MB check stops reading early, where legacy downloaded the whole file first. Exhaustion uses the final-attempt reschedule ([Retry exhaustion implementation](#retry-exhaustion-implementation))
+- **Why / risk:** Same outcome as legacy for Material `400`/`413`, Material `5xx`, SAS `400` and `5xx` (retried as legacy did) and over-size documents. Differences: (1) refused links, rejected SAS links, redirects and timeouts are new controls, so they have no legacy equivalent; (2) a `200` without `Location` or filename is retried and then FAILED, where legacy left the task to an unhandled exception that re-runs the job every hour; (3) the 15 MB check stops reading early, where legacy downloaded the whole file first. Exhaustion uses the final-attempt reschedule ([Retry exhaustion implementation](#retry-exhaustion-implementation))
 - **References:** new: `material/MaterialAttachmentException.java`, `material/MaterialUrlResolver.java`, `material/SasLinkValidator.java`, `material/MaterialClient.java`, `material/SasDocumentFetcher.java`, `material/MaterialAttachmentDownloader.java`, `task/SendEmailTask.java`, `task/TransientFailurePolicy.java`; legacy: `cpp-context-notification-notify` `EmailMaterialDownloader`, `DocumentDownloadClient`, `FailureSelector`, `SenderErrorResponseProcessor`; `cp-task-manager` `JobsRepository` (pickup query), `TaskExecutor`
 
 ## Material system user

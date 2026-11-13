@@ -36,6 +36,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendLetterCommandFactory.LETTER_URL;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.DELIVERY_FAILED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_FAILED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_REJECTED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_UNREACHABLE;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.STATUS_UNKNOWN;
 
 @ExtendWith(MockitoExtension.class)
 class CheckLetterStatusTaskTest {
@@ -117,7 +122,7 @@ class CheckLetterStatusTaskTest {
             final ExecutionInfo result = task.execute(checkLetterStatusJob(5));
 
             verify(statusService).markRequeued(notificationId);
-            verify(statusService, never()).markFailed(any(), any(), any());
+            verify(statusService, never()).markFailed(any(), any(), any(), any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
             final ArgumentCaptor<ExecutionInfo> resend = ArgumentCaptor.forClass(ExecutionInfo.class);
             verify(executionService).executeWith(resend.capture());
@@ -133,7 +138,8 @@ class CheckLetterStatusTaskTest {
             final ExecutionInfo result = task.execute(checkLetterStatusJob(0));
 
             verify(statusService).markFailed(notificationId, 400,
-                    "Validation failed for '" + notificationId + "' automatic resend attempt, remaining = 0");
+                    "Validation failed for '" + notificationId + "' automatic resend attempt, remaining = 0",
+                    DELIVERY_FAILED);
             verify(statusService, never()).markRequeued(any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
             verifyNoInteractions(executionService);
@@ -162,7 +168,8 @@ class CheckLetterStatusTaskTest {
             final ExecutionInfo result = task.execute(withRetriesRemaining(checkLetterStatusJob(5), 0));
 
             verify(statusService).markFailed(eq(notificationId), isNull(), eq(
-                    "Gov.Notify did not reach a terminal status within the retry window (last status 'pending-virus-check')"));
+                    "Gov.Notify did not reach a terminal status within the retry window (last status 'pending-virus-check')"),
+                    eq(STATUS_UNKNOWN));
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
     }
@@ -180,7 +187,7 @@ class CheckLetterStatusTaskTest {
             final ExecutionInfo result = task.execute(checkLetterStatusJob(5));
 
             verify(statusService).markFailed(eq(notificationId), isNull(),
-                    eq("Gov.Notify responded with status '" + status.getStatus() + "'"));
+                    eq("Gov.Notify responded with status '" + status.getStatus() + "'"), eq(DELIVERY_FAILED));
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
             verifyNoInteractions(executionService);
         }
@@ -207,7 +214,7 @@ class CheckLetterStatusTaskTest {
             task.execute(withRetriesRemaining(checkLetterStatusJob(5), 0));
 
             verify(statusService).markFailed(notificationId, 500,
-                    "Gov.Notify status polling did not recover within the retry window");
+                    "Gov.Notify status polling did not recover within the retry window", PROVIDER_FAILED);
         }
 
         @Test
@@ -232,7 +239,8 @@ class CheckLetterStatusTaskTest {
             task.execute(withRetriesRemaining(checkLetterStatusJob(5), 0));
 
             verify(statusService).markFailed(notificationId, 0,
-                    "Gov.Notify status polling did not recover within the retry window: the service could not be reached");
+                    "Gov.Notify status polling did not recover within the retry window: the service could not be reached",
+                    PROVIDER_UNREACHABLE);
         }
 
         @Test
@@ -241,7 +249,7 @@ class CheckLetterStatusTaskTest {
 
             final ExecutionInfo result = task.execute(checkLetterStatusJob(5));
 
-            verify(statusService).markFailed(notificationId, 404, "not found");
+            verify(statusService).markFailed(notificationId, 404, "not found", PROVIDER_REJECTED);
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
     }

@@ -21,6 +21,7 @@ import uk.gov.hmcts.cp.taskmanager.domain.ExecutionStatus;
 
 import java.io.IOException;
 import java.net.ConnectException;
+import java.net.http.HttpTimeoutException;
 import java.net.SocketTimeoutException;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -45,6 +46,12 @@ import static uk.gov.hmcts.cp.notification.logging.FailureReason.UNREACHABLE;
 import static uk.gov.hmcts.cp.notification.logging.Operation.DOWNLOAD;
 import static uk.gov.hmcts.cp.notification.logging.Operation.SEND;
 import static uk.gov.hmcts.cp.notification.logging.Operation.STATUS_CHECK;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_UNAVAILABLE;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_FAILED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_NO_RESPONSE;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_REJECTED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_UNREACHABLE;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.STATUS_UNKNOWN;
 
 @ExtendWith(MockitoExtension.class)
 class TransientFailurePolicyTest {
@@ -106,7 +113,7 @@ class TransientFailurePolicyTest {
         final ExecutionInfo result = policy.retryOrFail(
                 id, 503, "did not recover", jobWithRetriesRemaining(0), RetryCause.GOV_NOTIFY_SEND, EMAIL, serverError);
 
-        verify(statusService).markFailed(id, 503, "did not recover");
+        verify(statusService).markFailed(id, 503, "did not recover", PROVIDER_FAILED);
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
     }
 
@@ -149,7 +156,7 @@ class TransientFailurePolicyTest {
         final ExecutionInfo result = policy.retryOrFail(
                 id, 503, "did not recover", finalAttemptJob(), RetryCause.GOV_NOTIFY_SEND, EMAIL, serverError);
 
-        verify(statusService).markFailed(id, 503, "did not recover");
+        verify(statusService).markFailed(id, 503, "did not recover", PROVIDER_FAILED);
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
     }
 
@@ -283,7 +290,8 @@ class TransientFailurePolicyTest {
                 RetryCause.GOV_NOTIFY_SEND, EMAIL, govNotifyException);
 
         verify(statusService).markFailed(notificationId, 0,
-                "Gov.Notify send did not recover within the retry window: the service could not be reached");
+                "Gov.Notify send did not recover within the retry window: the service could not be reached",
+                PROVIDER_UNREACHABLE);
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         verify(dependencyCallLogger).warn(dependencyCallCaptor.capture(), messageCaptor.capture());
         final String message = messageCaptor.getValue();
@@ -352,7 +360,7 @@ class TransientFailurePolicyTest {
 
         final ExecutionInfo result = policy.pollAgainOrFail(id, "no terminal status", finalAttemptJob());
 
-        verify(statusService).markFailed(id, null, "no terminal status");
+        verify(statusService).markFailed(id, null, "no terminal status", STATUS_UNKNOWN);
         verifyNoInteractions(dependencyCallLogger);
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
     }
@@ -361,9 +369,10 @@ class TransientFailurePolicyTest {
     void fail_should_mark_failed_and_complete_without_retry() {
         final UUID id = UUID.randomUUID();
 
-        final ExecutionInfo result = policy.fail(id, 400, "bad request", jobWithRetriesRemaining(3));
+        final ExecutionInfo result =
+                policy.fail(id, 400, "bad request", PROVIDER_REJECTED, jobWithRetriesRemaining(3));
 
-        verify(statusService).markFailed(id, 400, "bad request");
+        verify(statusService).markFailed(id, 400, "bad request", PROVIDER_REJECTED);
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         assertThat(result.isShouldRetry()).isFalse();
     }
@@ -372,9 +381,35 @@ class TransientFailurePolicyTest {
     void fail_should_accept_a_null_status_code() {
         final UUID id = UUID.randomUUID();
 
-        policy.fail(id, null, "terminal status", jobWithRetriesRemaining(3));
+        policy.fail(id, null, "terminal status", PROVIDER_REJECTED, jobWithRetriesRemaining(3));
 
-        verify(statusService).markFailed(id, null, "terminal status");
+        verify(statusService).markFailed(id, null, "terminal status", PROVIDER_REJECTED);
+    }
+
+    @Test
+    void retryOrFail_should_fail_a_download_as_attachment_unavailable_when_retries_are_exhausted() {
+        final UUID id = UUID.randomUUID();
+        final ConnectException connectException = new ConnectException("Connection refused");
+
+        policy.retryOrFail(id, null, "Material attachment download did not recover within the retry window",
+                finalAttemptJob(), RetryCause.MATERIAL_DOWNLOAD, EMAIL, connectException);
+
+        verify(statusService).markFailed(id, null,
+                "Material attachment download did not recover within the retry window: the service could not be reached",
+                ATTACHMENT_UNAVAILABLE);
+    }
+
+    @Test
+    void retryOrFail_should_fail_as_provider_no_response_when_the_provider_never_responds_within_the_retry_window() {
+        final UUID id = UUID.randomUUID();
+        final HttpTimeoutException httpTimeoutException = new HttpTimeoutException("request timed out");
+
+        policy.retryOrFail(id, null, "Office 365 send did not recover within the retry window",
+                finalAttemptJob(), RetryCause.OFFICE365_SEND, EMAIL, httpTimeoutException);
+
+        verify(statusService).markFailed(id, null,
+                "Office 365 send did not recover within the retry window: the service did not respond",
+                PROVIDER_NO_RESPONSE);
     }
 
     private static ExecutionInfo finalAttemptJob() {

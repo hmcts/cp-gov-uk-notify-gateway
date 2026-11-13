@@ -107,7 +107,7 @@ public final class MaterialServiceStub {
         WireMockSupport.wiremockServer().stubFor(get(urlPathEqualTo(materialQueryPath(materialId)))
                 .inScenario(UNAVAILABLE_SCENARIO + materialId)
                 .whenScenarioStateIs(Scenario.STARTED)
-                .willReturn(aResponse().withStatus(404))
+                .willReturn(aResponse().withStatus(503))
                 .willSetStateTo(AVAILABLE));
         return this;
     }
@@ -198,6 +198,14 @@ public final class MaterialServiceStub {
                 .findAll(getRequestedFor(urlPathEqualTo(materialQueryPath(materialId)))))
                 .as("every attempt asks the Material service for a fresh document link")
                 .hasSizeGreaterThanOrEqualTo(minimumAttempts);
+        return this;
+    }
+
+    public MaterialServiceStub documentWasRequestedOnce(final String materialId) {
+        assertThat(WireMockSupport.wiremockServer()
+                .findAll(getRequestedFor(urlPathEqualTo(materialQueryPath(materialId)))))
+                .as("the Material service is asked for the document once, with no retry")
+                .hasSize(1);
         return this;
     }
 

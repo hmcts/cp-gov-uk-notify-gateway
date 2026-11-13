@@ -18,7 +18,9 @@ import java.util.concurrent.TimeoutException;
 /**
  * Queries Material ({@code query:material.query.material}) for a document as the notification-notify
  * system user and reads back the SAS link ({@code Location}) and the filename ({@code Content-Location},
- * the text after {@code filename=}).
+ * the text after {@code filename=}). A request Material refuses (400, 401, 403), a document it does not have (404)
+ * and one that is too large (413) fail at once; any other status, a missing link or filename, a timeout or a
+ * connection failure may recover, so is retried.
  */
 @Component
 public class MaterialClient {
@@ -28,6 +30,9 @@ public class MaterialClient {
 
     private static final int HTTP_OK = 200;
     private static final int HTTP_BAD_REQUEST = 400;
+    private static final int HTTP_UNAUTHORIZED = 401;
+    private static final int HTTP_FORBIDDEN = 403;
+    private static final int HTTP_NOT_FOUND = 404;
     private static final int HTTP_PAYLOAD_TOO_LARGE = 413;
     private static final String FILENAME_MARKER = "filename=";
 
@@ -58,6 +63,13 @@ public class MaterialClient {
         if (status == HTTP_BAD_REQUEST || status == HTTP_PAYLOAD_TOO_LARGE) {
             throw MaterialAttachmentException.permanent(
                     "Material rejected the document request (HTTP " + status + ")", status);
+        }
+        if (status == HTTP_UNAUTHORIZED || status == HTTP_FORBIDDEN) {
+            throw MaterialAttachmentException.permanent(
+                    "Material refused access to the document (HTTP " + status + ")", status);
+        }
+        if (status == HTTP_NOT_FOUND) {
+            throw MaterialAttachmentException.permanent("Material has no such document (HTTP 404)", status);
         }
         if (status != HTTP_OK) {
             throw MaterialAttachmentException.retryable(

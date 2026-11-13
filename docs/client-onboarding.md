@@ -161,3 +161,37 @@ To consume it:
 - Treat it as final. Resending the same payload fails the same way; fix the payload first.
 - Validate against `contracts/command-send-email-notification.schema.json` /
   `command-send-letter-notification.schema.json` before sending, so rejections stay rare.
+
+## 3. Alerts to your team
+
+NG logs one line for each request it rejects and each notification that fails, with the reply queue it was for
+and a reason (PEG-3718, PEG-3719). An Azure Monitor log search alert counts these lines for each reply queue and
+emails the team that owns it. The line never holds the request, the recipient's address or the provider's error
+text. Your team's email address is added to the alert when your service is onboarded.
+
+| JSON field | Value |
+|------------|-------|
+| `replyQueue` | the `ReplyTo` queue of the request |
+| `notificationOutcome` | `rejected` (the request was not accepted) or `failed` (it was accepted and then failed) |
+| `outcomeReason` | see below |
+| `notificationChannel` | `email` or `letter` |
+
+| `outcomeReason` | When |
+|-----------------|------|
+| `unreadable-request` | the request could not be read (not valid JSON, or a field of the wrong type) |
+| `invalid-request` | the request failed validation |
+| `attachment-not-found` | the attachment does not exist (`404` from blob storage, Material or the document link) |
+| `attachment-access-refused` | access to the attachment was refused (`401` or `403`) |
+| `attachment-too-large` | the attachment is over the size limit |
+| `attachment-bad-link` | the link is not one NG may use: not on the Material service, not an allowed blob host, a document link that is not `https` Azure Blob Storage, or a request Material rejects (`400`) |
+| `attachment-unavailable` | the attachment could not be downloaded before the retry window ended |
+| `provider-rejected` | GOV.UK Notify or Office 365 rejected the notification |
+| `provider-unreachable` | GOV.UK Notify or Office 365 could not be reached before the retry window ended |
+| `provider-no-response` | GOV.UK Notify or Office 365 did not respond before the retry window ended |
+| `provider-failed` | GOV.UK Notify or Office 365 kept failing until the retry window ended |
+| `delivery-failed` | GOV.UK Notify reported that the email or letter could not be delivered |
+| `status-unknown` | GOV.UK Notify had not finished with the notification when the retry window ended |
+
+A missing attachment or one NG is refused access to fails straight away; a network problem fetching it is
+retried until the retry window ends. Each line matches a `notification-validation-failed` or
+`notification-failed` event on your reply queue.
