@@ -12,6 +12,8 @@
                 <loggerName/>
                 <threadName/>
                 <logLevel/>
+                <!-- Fields added with addKeyValue, e.g. dependency/outcome/statusCode (PEG-3720) -->
+                <keyValuePairs/>
                 <pattern>
                     <pattern>{"exception": "%xException{full}"}</pattern>
                 </pattern>

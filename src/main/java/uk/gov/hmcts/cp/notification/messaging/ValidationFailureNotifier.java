@@ -3,9 +3,12 @@ package uk.gov.hmcts.cp.notification.messaging;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 
+import uk.gov.hmcts.cp.notification.logging.Channel;
+import uk.gov.hmcts.cp.notification.logging.OutcomeReason;
 import uk.gov.hmcts.cp.notification.result.NotificationValidationFailedEvent;
 import uk.gov.hmcts.cp.notification.result.ResultEventPublisher;
 
@@ -13,8 +16,16 @@ import java.util.Comparator;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.stream.Collectors;
 
+import static java.lang.String.format;
+import static java.util.stream.Collectors.joining;
+import static org.slf4j.LoggerFactory.getLogger;
+import static uk.gov.hmcts.cp.notification.logging.LogField.NOTIFICATION_CHANNEL;
+import static uk.gov.hmcts.cp.notification.logging.LogField.NOTIFICATION_OUTCOME;
+import static uk.gov.hmcts.cp.notification.logging.LogField.OUTCOME_REASON;
+import static uk.gov.hmcts.cp.notification.logging.LogField.REPLY_QUEUE;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.INVALID_REQUEST;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.UNREADABLE_REQUEST;
 import static uk.gov.hmcts.cp.notification.result.NotificationValidationFailedEvent.PAYLOAD_VALIDATION_FAILED;
 
 /**
@@ -24,6 +35,8 @@ import static uk.gov.hmcts.cp.notification.result.NotificationValidationFailedEv
  * it is the parser's message, prefixed with the field when the parser names one; for a payload that was read but
  * is invalid it is every constraint violation, sorted by field so the same payload always gives the same text.
  * A failure to send the event is thrown to the caller, which abandons the command so Service Bus redelivers it.
+ * Once the event is sent, the rejection is logged with the fields the requester alert counts for the team that owns
+ * the reply queue (PEG-3718). The line holds neither the request nor its details, which may contain an address.
  */
 @Component
 @RequiredArgsConstructor
@@ -33,16 +46,38 @@ public class ValidationFailureNotifier {
             .<ConstraintViolation<?>, String>comparing(violation -> violation.getPropertyPath().toString())
             .thenComparing(ConstraintViolation::getMessage);
 
+    private final Logger logger = getLogger(ValidationFailureNotifier.class);
+
     private final ResultEventPublisher resultEventPublisher;
 
     public <T> void notifyValidationFailed(
-            final String replyQueue, final Set<ConstraintViolation<T>> violations, final String originalPayload) {
-        publish(replyQueue, describe(violations), originalPayload);
+            final String replyQueue, final Channel channel, final Set<ConstraintViolation<T>> violations,
+            final String originalPayload) {
+        final String details = describe(violations);
+        publish(replyQueue, details, originalPayload);
+        logRejected(channel, replyQueue, INVALID_REQUEST);
     }
 
     public void notifyUnreadable(
-            final String replyQueue, final JacksonException cause, final String originalPayload) {
-        publish(replyQueue, details(cause), originalPayload);
+            final String replyQueue, final Channel channel, final JacksonException cause,
+            final String originalPayload) {
+        final String details = details(cause);
+        publish(replyQueue, details, originalPayload);
+        logRejected(channel, replyQueue, UNREADABLE_REQUEST);
+    }
+
+    private void logRejected(final Channel channel, final String replyQueue, final OutcomeReason outcomeReason) {
+        final String channelName = channel.getFieldValue();
+        final String outcomeReasonName = outcomeReason.getFieldValue();
+        final String outcomeReasonDescription = outcomeReason.getDescription();
+        final String message = format("Rejected the %s request for reply queue '%s': %s",
+                channelName, replyQueue, outcomeReasonDescription);
+        logger.atWarn()
+                .addKeyValue(REPLY_QUEUE, replyQueue)
+                .addKeyValue(NOTIFICATION_OUTCOME, "rejected")
+                .addKeyValue(OUTCOME_REASON, outcomeReasonName)
+                .addKeyValue(NOTIFICATION_CHANNEL, channelName)
+                .log(message);
     }
 
     private void publish(final String replyQueue, final String details, final String originalPayload) {
@@ -68,7 +103,7 @@ public class ValidationFailureNotifier {
         final String field = cause.getPath().stream()
                 .map(JacksonException.Reference::getPropertyName)
                 .filter(Objects::nonNull)
-                .collect(Collectors.joining("."));
+                .collect(joining("."));
         return field.isEmpty() ? cause.getOriginalMessage() : field + ": " + cause.getOriginalMessage();
     }
 }

@@ -11,6 +11,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import uk.gov.hmcts.cp.notification.service.NotificationEmailDetails;
 import uk.gov.hmcts.cp.notification.service.NotificationStatusService;
+import uk.gov.hmcts.cp.notification.time.Clock;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionStatus;
 
@@ -39,8 +40,8 @@ class RecordSentTaskTest {
     private final UUID notificationId = UUID.randomUUID();
 
     @BeforeEach
-    void setUp() {
-        task = new RecordSentTask(statusService, LEGACY_EMAIL_RETRY_DURATIONS);
+    void createTaskWithARealRetrySchedule() {
+        task = new RecordSentTask(statusService, new TaskRetrySchedule(new Clock()), LEGACY_EMAIL_RETRY_DURATIONS);
     }
 
     @Test
@@ -61,7 +62,7 @@ class RecordSentTaskTest {
 
         final ExecutionInfo result = task.execute(recordSentJob(retriesRemaining));
 
-        verify(statusService, never()).markFailed(any(), any(), any());
+        verify(statusService, never()).markFailed(any());
         assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
         assertThat(result.isShouldRetry()).isTrue();
     }

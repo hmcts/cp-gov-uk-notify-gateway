@@ -1,5 +1,10 @@
 package uk.gov.hmcts.cp.notification.material;
 
+import static java.lang.String.format;
+import static java.lang.Thread.currentThread;
+import static uk.gov.hmcts.cp.notification.material.MaterialAttachmentException.permanent;
+import static uk.gov.hmcts.cp.notification.material.MaterialAttachmentException.retryable;
+
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -28,11 +33,16 @@ import java.util.concurrent.TimeoutException;
  * follows redirects. Nothing is added to the request — no credential, no system user, no correlation id —
  * so it carries only the link itself. The size cap is enforced
  * from {@code Content-Length} before reading and, when it is absent, by stopping the read as soon as the cap
- * is passed. A single deadline (connect + read timeout) bounds the whole download.
+ * is passed. A single deadline (connect + read timeout) bounds the whole download. Refused access (401, 403), a
+ * missing document (404) and a document that is too large fail at once; any other status, a timeout or a
+ * connection failure may recover, so is retried.
  */
 @Component
 public class SasDocumentFetcher {
     private static final int HTTP_OK = 200;
+    private static final int HTTP_UNAUTHORIZED = 401;
+    private static final int HTTP_FORBIDDEN = 403;
+    private static final int HTTP_NOT_FOUND = 404;
     private static final int HTTP_PAYLOAD_TOO_LARGE = 413;
     private static final byte[] DISCARDED = new byte[0];
 
@@ -55,11 +65,18 @@ public class SasDocumentFetcher {
         final HttpRequest request = HttpRequest.newBuilder(sasLink).GET().timeout(readTimeout).build();
         final HttpResponse<byte[]> response = send(request);
         final int status = response.statusCode();
-        if (status != HTTP_OK) {
-            throw MaterialAttachmentException.retryable(
-                    "The Material document could not be downloaded (HTTP " + status + ")", status);
-        }
+        failUnlessOk(status);
         return response.body();
+    }
+
+    private void failUnlessOk(final int status) {
+        if (status == HTTP_UNAUTHORIZED || status == HTTP_FORBIDDEN) {
+            throw permanent(format("Access to the Material document was refused (HTTP %s)", status), status);
+        } else if (status == HTTP_NOT_FOUND) {
+            throw permanent("The Material document was not found (HTTP 404)", status);
+        } else if (status != HTTP_OK) {
+            throw retryable(format("The Material document could not be downloaded (HTTP %s)", status), status);
+        }
     }
 
     private HttpResponse<byte[]> send(final HttpRequest request) {
@@ -68,18 +85,18 @@ public class SasDocumentFetcher {
             return pending.get(deadline.toMillis(), TimeUnit.MILLISECONDS);
         } catch (final TimeoutException e) {
             pending.cancel(true);
-            throw MaterialAttachmentException.retryable("The Material document was not downloaded in time", null, e);
+            throw retryable("The Material document was not downloaded in time", null, e);
         } catch (final ExecutionException e) {
             final DocumentTooLargeException tooLarge = tooLargeCause(e);
             if (tooLarge != null) {
-                throw MaterialAttachmentException.permanent(tooLargeMessage(tooLarge), HTTP_PAYLOAD_TOO_LARGE);
+                throw permanent(tooLargeMessage(tooLarge), HTTP_PAYLOAD_TOO_LARGE);
             }
-            throw MaterialAttachmentException.retryable(
+            throw retryable(
                     "The Material document could not be downloaded", null, e.getCause());
         } catch (final InterruptedException e) {
             pending.cancel(true);
-            Thread.currentThread().interrupt();
-            throw MaterialAttachmentException.retryable("The Material document download was interrupted", null, e);
+            currentThread().interrupt();
+            throw retryable("The Material document download was interrupted", null, e);
         }
     }
 

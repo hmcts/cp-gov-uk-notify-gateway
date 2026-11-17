@@ -1,15 +1,35 @@
 package uk.gov.hmcts.cp.notification.task;
 
+import static java.lang.String.format;
+import static java.util.List.copyOf;
+import static java.util.Optional.of;
+import static java.util.Optional.ofNullable;
+import static org.slf4j.LoggerFactory.getLogger;
+import static uk.gov.hmcts.cp.notification.logging.Channel.LETTER;
+import static uk.gov.hmcts.cp.notification.logging.LogField.CHANNEL;
+import static uk.gov.hmcts.cp.notification.logging.LogField.DEPENDENCY;
+import static uk.gov.hmcts.cp.notification.logging.LogField.OPERATION;
+import static uk.gov.hmcts.cp.notification.logging.LogField.OUTCOME;
+import static uk.gov.hmcts.cp.notification.logging.LogField.REASON;
+import static uk.gov.hmcts.cp.notification.logging.LogField.STATUS_CODE;
+import static uk.gov.hmcts.cp.notification.task.RetryCause.GOV_NOTIFY_SEND;
+import static uk.gov.hmcts.cp.notification.task.RetryCause.MATERIAL_DOWNLOAD;
+
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.slf4j.spi.LoggingEventBuilder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import uk.gov.hmcts.cp.notification.logging.FailureReason;
+import uk.gov.hmcts.cp.notification.logging.FailureReasonClassifier;
+import uk.gov.hmcts.cp.notification.logging.OutcomeReason;
+import uk.gov.hmcts.cp.notification.logging.OutcomeReasonClassifier;
 import uk.gov.hmcts.cp.notification.material.MaterialAttachmentDownloader;
 import uk.gov.hmcts.cp.notification.material.MaterialAttachmentException;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyClient;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyFailureClassifier;
+import uk.gov.hmcts.cp.notification.service.NotificationFailure;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
 import uk.gov.hmcts.cp.taskmanager.service.ExecutionService;
 import uk.gov.hmcts.cp.taskmanager.service.task.ExecutableTask;
@@ -17,6 +37,7 @@ import uk.gov.hmcts.cp.taskmanager.service.task.Task;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Downloads the letter's PDF through Material and sends it to Gov.Notify as a precompiled letter (legacy
@@ -27,28 +48,43 @@ import java.util.Optional;
 public class SendLetterTask implements ExecutableTask {
     public static final String TASK_NAME = "SEND_LETTER";
 
-    private static final Logger LOG = LoggerFactory.getLogger(SendLetterTask.class);
+    private final Logger logger = getLogger(SendLetterTask.class);
 
     private final MaterialAttachmentDownloader materialAttachmentDownloader;
     private final GovNotifyClient govNotifyClient;
     private final TransientFailurePolicy failurePolicy;
+    private final FailedNotificationRecorder failedNotificationRecorder;
+    private final TaskRetrySchedule taskRetrySchedule;
     private final ExecutionService executionService;
     private final CpTaskFactory taskFactory;
+    private final GovNotifyFailureClassifier govNotifyFailureClassifier;
+    private final FailureReasonClassifier failureReasonClassifier;
+    private final OutcomeReasonClassifier outcomeReasonClassifier;
     private final List<Long> retryDurationsSecs;
 
     public SendLetterTask(
             final MaterialAttachmentDownloader materialAttachmentDownloader,
             final GovNotifyClient govNotifyClient,
             final TransientFailurePolicy failurePolicy,
+            final FailedNotificationRecorder failedNotificationRecorder,
+            final TaskRetrySchedule taskRetrySchedule,
             final ExecutionService executionService,
             final CpTaskFactory taskFactory,
+            final GovNotifyFailureClassifier govNotifyFailureClassifier,
+            final FailureReasonClassifier failureReasonClassifier,
+            final OutcomeReasonClassifier outcomeReasonClassifier,
             @Value("${cp.notification.retry.letter-durations-secs}") final List<Long> retryDurationsSecs) {
         this.materialAttachmentDownloader = materialAttachmentDownloader;
         this.govNotifyClient = govNotifyClient;
         this.failurePolicy = failurePolicy;
+        this.failedNotificationRecorder = failedNotificationRecorder;
+        this.taskRetrySchedule = taskRetrySchedule;
         this.executionService = executionService;
         this.taskFactory = taskFactory;
-        this.retryDurationsSecs = List.copyOf(retryDurationsSecs);
+        this.govNotifyFailureClassifier = govNotifyFailureClassifier;
+        this.failureReasonClassifier = failureReasonClassifier;
+        this.outcomeReasonClassifier = outcomeReasonClassifier;
+        this.retryDurationsSecs = copyOf(retryDurationsSecs);
     }
 
     @Override
@@ -58,8 +94,8 @@ public class SendLetterTask implements ExecutableTask {
         try {
             final byte[] pdf = materialAttachmentDownloader.download(letter.letterUrl(), letter.notificationId()).content();
             result = send(letter, pdf, executionInfo);
-        } catch (final MaterialAttachmentException e) {
-            result = downloadFailed(letter, e, executionInfo);
+        } catch (final MaterialAttachmentException materialAttachmentException) {
+            result = downloadFailed(letter, materialAttachmentException, executionInfo);
         }
         return result;
     }
@@ -67,42 +103,122 @@ public class SendLetterTask implements ExecutableTask {
     private ExecutionInfo send(final LetterJob letter, final byte[] pdf, final ExecutionInfo executionInfo) {
         ExecutionInfo result;
         try {
-            LOG.info("Sending letter for notification {} (first class: {})", letter.notificationId(), letter.firstClass());
-            final String reference = govNotifyClient.sendPrecompiledLetter(letter.notificationId(), pdf, letter.firstClass());
+            final UUID notificationId = letter.notificationId();
+            final boolean firstClass = letter.firstClass();
+            logSending(notificationId, firstClass);
+            final String reference = govNotifyClient.sendPrecompiledLetter(notificationId, pdf, firstClass);
+            logSent(notificationId, reference);
             executionService.executeWith(taskFactory.createCheckLetterStatusJob(letter, reference));
-            result = TransientFailurePolicy.completed(executionInfo);
-        } catch (final GovNotifyException e) {
-            if (GovNotifyFailureClassifier.isTemporary(e.getHttpStatus(), e.getMessage())) {
-                result = failurePolicy.retryOrFail(letter.notificationId(), e.getHttpStatus(),
-                        "Gov.Notify letter send did not recover within the retry window", executionInfo,
-                        retryDurationsSecs, RetryCause.GOV_NOTIFY_SEND);
+            result = taskRetrySchedule.completed(executionInfo);
+        } catch (final GovNotifyException govNotifyException) {
+            final Optional<Integer> httpStatusCode = govNotifyException.getHttpStatusCode();
+            if (govNotifyFailureClassifier.isTemporary(govNotifyException)) {
+                final TransientFailure transientFailure = new TransientFailure(
+                        letter.notificationId(),
+                        GOV_NOTIFY_SEND,
+                        LETTER,
+                        httpStatusCode,
+                        govNotifyException,
+                        "Gov.Notify letter send did not recover within the retry window");
+                result = failurePolicy.retryOrFail(transientFailure, executionInfo, retryDurationsSecs);
             } else {
-                LOG.warn("Permanent letter send failure for notification {} (http {}) — marking FAILED",
-                        letter.notificationId(), e.getHttpStatus());
-                result = failurePolicy.fail(letter.notificationId(), e.getHttpStatus(), e.getMessage(), executionInfo);
+                final Optional<FailureReason> failureReason =
+                        failureReasonClassifier.classify(httpStatusCode, govNotifyException);
+                final UUID notificationId = letter.notificationId();
+                logSendFailedPermanently(notificationId, httpStatusCode, failureReason);
+                final OutcomeReason outcomeReason = outcomeReasonClassifier.providerFailed(failureReason);
+                final NotificationFailure notificationFailure = new NotificationFailure(
+                        notificationId,
+                        LETTER,
+                        govNotifyException.getHttpStatus(),
+                        govNotifyException.getMessage(),
+                        outcomeReason);
+                result = failedNotificationRecorder.recordFailed(notificationFailure, executionInfo);
             }
         }
         return result;
     }
 
     private ExecutionInfo downloadFailed(
-            final LetterJob letter, final MaterialAttachmentException failure, final ExecutionInfo executionInfo) {
+            final LetterJob letter,
+            final MaterialAttachmentException materialAttachmentException,
+            final ExecutionInfo executionInfo) {
         final ExecutionInfo result;
-        if (failure.isRetryable()) {
-            result = failurePolicy.retryOrFail(letter.notificationId(), failure.getStatusCode(),
-                    "Material letter download did not recover within the retry window", executionInfo,
-                    retryDurationsSecs, RetryCause.MATERIAL_DOWNLOAD);
+        final Optional<Integer> statusCode = ofNullable(materialAttachmentException.getStatusCode());
+        if (materialAttachmentException.isRetryable()) {
+            final TransientFailure transientFailure = new TransientFailure(
+                    letter.notificationId(),
+                    MATERIAL_DOWNLOAD,
+                    LETTER,
+                    statusCode,
+                    materialAttachmentException,
+                    "Material letter download did not recover within the retry window");
+            result = failurePolicy.retryOrFail(transientFailure, executionInfo, retryDurationsSecs);
         } else {
-            LOG.warn("Permanent Material letter download failure for notification {} ({}) — marking FAILED, no retry",
-                    letter.notificationId(), failure.getMessage());
-            result = failurePolicy.fail(letter.notificationId(), failure.getStatusCode(), failure.getMessage(),
-                    executionInfo);
+            final UUID notificationId = letter.notificationId();
+            final String failureMessage = materialAttachmentException.getMessage();
+            logDownloadFailedPermanently(notificationId, statusCode, failureMessage);
+            final OutcomeReason outcomeReason = outcomeReasonClassifier.attachmentFailed(statusCode);
+            final NotificationFailure notificationFailure = new NotificationFailure(
+                    notificationId,
+                    LETTER,
+                    materialAttachmentException.getStatusCode(),
+                    failureMessage,
+                    outcomeReason);
+            result = failedNotificationRecorder.recordFailed(notificationFailure, executionInfo);
         }
         return result;
     }
 
+    private void logSending(final UUID notificationId, final boolean firstClass) {
+        final String message = format("Sending letter for notification '%s' (first class: '%s')", notificationId, firstClass);
+        logger.info(message);
+    }
+
+    private void logSent(final UUID notificationId, final String reference) {
+        final String message = format(
+                "Sent letter for notification '%s' via Gov.Notify (reference '%s')", notificationId, reference);
+        logger.atInfo()
+                .addKeyValue(DEPENDENCY, "gov-uk-notify")
+                .addKeyValue(OPERATION, "send")
+                .addKeyValue(CHANNEL, "letter")
+                .addKeyValue(OUTCOME, "succeeded")
+                .log(message);
+    }
+
+    /** {@code failureReason} says why when Gov.Notify gave no HTTP response, so the outage alert can count it. */
+    private void logSendFailedPermanently(
+            final UUID notificationId, final Optional<Integer> statusCode, final Optional<FailureReason> failureReason) {
+        final Optional<String> statusCodeText = statusCode.map(String::valueOf);
+        final String message = format(
+                "Permanent letter send failure for notification '%s' (http '%s') — marking FAILED",
+                notificationId, statusCodeText.orElse("none"));
+        final LoggingEventBuilder loggingEventBuilder = logger.atWarn()
+                .addKeyValue(DEPENDENCY, "gov-uk-notify")
+                .addKeyValue(OPERATION, "send")
+                .addKeyValue(CHANNEL, "letter")
+                .addKeyValue(OUTCOME, "permanent-failure");
+        statusCode.ifPresent(code -> loggingEventBuilder.addKeyValue(STATUS_CODE, code));
+        failureReason.ifPresent(reason -> loggingEventBuilder.addKeyValue(REASON, reason.getFieldValue()));
+        loggingEventBuilder.log(message);
+    }
+
+    private void logDownloadFailedPermanently(
+            final UUID notificationId, final Optional<Integer> statusCode, final String failureMessage) {
+        final String message = format(
+                "Permanent Material letter download failure for notification '%s' ('%s') — marking FAILED, no retry",
+                notificationId, failureMessage);
+        final LoggingEventBuilder loggingEventBuilder = logger.atWarn()
+                .addKeyValue(DEPENDENCY, "material")
+                .addKeyValue(OPERATION, "download")
+                .addKeyValue(CHANNEL, "letter")
+                .addKeyValue(OUTCOME, "permanent-failure");
+        statusCode.ifPresent(code -> loggingEventBuilder.addKeyValue(STATUS_CODE, code));
+        loggingEventBuilder.log(message);
+    }
+
     @Override
     public Optional<List<Long>> getRetryDurationsInSecs() {
-        return Optional.of(retryDurationsSecs);
+        return of(retryDurationsSecs);
     }
 }
