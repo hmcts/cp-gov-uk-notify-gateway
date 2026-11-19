@@ -26,7 +26,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static uk.gov.hmcts.cp.notification.integration.testdata.TransientFailurePolicyFactory.aFailedNotificationRecorder;
-import static uk.gov.hmcts.cp.notification.integration.testdata.TransientFailurePolicyFactory.aStatusCheckFailureHandler;
+import static uk.gov.hmcts.cp.notification.integration.testdata.TransientFailurePolicyFactory.aGovNotifyFailureHandler;
 import static uk.gov.hmcts.cp.notification.integration.testdata.TransientFailurePolicyFactory.aTransientFailurePolicy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -62,7 +62,7 @@ class CheckAcceptedLetterStatusTaskTest {
         task = new CheckAcceptedLetterStatusTask(
                 new LetterStatusPoller(govNotifyClient, statusService, failurePolicy,
                         aFailedNotificationRecorder(statusService, taskRetrySchedule),
-                        aStatusCheckFailureHandler(statusService, taskRetrySchedule),
+                        aGovNotifyFailureHandler(statusService, taskRetrySchedule),
                         taskRetrySchedule, executionService, taskFactory),
                 LEGACY_ACCEPTED_LETTER_RETRY_DURATIONS);
     }

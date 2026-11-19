@@ -8,10 +8,8 @@ import static uk.gov.hmcts.cp.notification.logging.FailureReason.UNREACHABLE;
 import static uk.gov.hmcts.cp.notification.logging.Operation.DOWNLOAD;
 import static uk.gov.hmcts.cp.notification.logging.Operation.SEND;
 import static uk.gov.hmcts.cp.notification.logging.Operation.STATUS_CHECK;
-import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_ACCESS_REFUSED;
 import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_BAD_LINK;
 import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_NOT_FOUND;
-import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_TOO_LARGE;
 import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_UNAVAILABLE;
 import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_FAILED;
 import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_NO_RESPONSE;
@@ -20,42 +18,22 @@ import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_UNREAC
 
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+
+import uk.gov.hmcts.cp.notification.failure.DownloadStatusTable;
 
 class OutcomeReasonClassifierTest {
-    private final OutcomeReasonClassifier outcomeReasonClassifier = new OutcomeReasonClassifier();
+    private final OutcomeReasonClassifier outcomeReasonClassifier =
+            new OutcomeReasonClassifier(new DownloadStatusTable());
 
+    /** The full table is tested in {@code DownloadStatusTableTest}; these check the classifier answers from it. */
     @Nested
     class AttachmentFailed {
 
         @Test
-        void should_classify_a_404_as_attachment_not_found() {
+        void should_take_the_outcome_reason_for_a_status_code_from_the_download_status_table() {
             final OutcomeReason outcomeReason = outcomeReasonClassifier.attachmentFailed(of(404));
 
             assertThat(outcomeReason).isEqualTo(ATTACHMENT_NOT_FOUND);
-        }
-
-        @ParameterizedTest
-        @ValueSource(ints = {401, 403})
-        void should_classify_a_401_or_403_as_attachment_access_refused(final int statusCode) {
-            final OutcomeReason outcomeReason = outcomeReasonClassifier.attachmentFailed(of(statusCode));
-
-            assertThat(outcomeReason).isEqualTo(ATTACHMENT_ACCESS_REFUSED);
-        }
-
-        @Test
-        void should_classify_a_413_as_attachment_too_large() {
-            final OutcomeReason outcomeReason = outcomeReasonClassifier.attachmentFailed(of(413));
-
-            assertThat(outcomeReason).isEqualTo(ATTACHMENT_TOO_LARGE);
-        }
-
-        @Test
-        void should_classify_a_400_as_attachment_bad_link() {
-            final OutcomeReason outcomeReason = outcomeReasonClassifier.attachmentFailed(of(400));
-
-            assertThat(outcomeReason).isEqualTo(ATTACHMENT_BAD_LINK);
         }
 
         @Test

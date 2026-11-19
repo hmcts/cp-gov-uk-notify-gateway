@@ -5,6 +5,7 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
+import uk.gov.hmcts.cp.notification.failure.DownloadStatusTable;
 import uk.gov.hmcts.cp.notification.integration.Fixtures;
 import uk.gov.hmcts.cp.notification.integration.stubs.support.AzuriteContainerSupport;
 
@@ -49,6 +50,7 @@ class AttachmentDownloaderIntegrationTest {
     private static AttachmentDownloader downloaderWithMaxBytes(final long maxBytes) {
         return new AttachmentDownloader(
                 new BlobClientFactory(AzuriteContainerSupport.getConnectionString(), new BlobHostValidator(List.of())),
+                new DownloadStatusTable(),
                 maxBytes);
     }
 }

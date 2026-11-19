@@ -1,5 +1,7 @@
 package uk.gov.hmcts.cp.notification.material;
 
+import static uk.gov.hmcts.cp.notification.logging.Dependency.MATERIAL;
+
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -35,7 +37,7 @@ public class MaterialUrlResolver {
         } else if (loopbackRewriter.canRewrite(link)) {
             resolved = loopbackRewriter.rewrite(link);
         } else {
-            throw MaterialAttachmentException.permanent(REFUSED, null);
+            throw MaterialAttachmentException.permanent(MATERIAL, REFUSED, null);
         }
         return resolved;
     }
@@ -45,10 +47,10 @@ public class MaterialUrlResolver {
         try {
             link = new URI(materialUrl.trim());
         } catch (final URISyntaxException e) {
-            throw MaterialAttachmentException.permanent(REFUSED, null);
+            throw MaterialAttachmentException.permanent(MATERIAL, REFUSED, null);
         }
         if (link.getScheme() == null || link.getHost() == null) {
-            throw MaterialAttachmentException.permanent(REFUSED, null);
+            throw MaterialAttachmentException.permanent(MATERIAL, REFUSED, null);
         }
         return link;
     }

@@ -10,12 +10,15 @@ import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static uk.gov.hmcts.cp.notification.integration.testdata.MaterialSettingsFactory.SYSTEM_USER_ID;
+import static uk.gov.hmcts.cp.notification.logging.Dependency.MATERIAL;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+
+import uk.gov.hmcts.cp.notification.failure.DownloadStatusTable;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -39,7 +42,7 @@ class MaterialClientTest {
     void createMaterialClientWithAOneMillisecondDeadline() {
         final MaterialSettings materialSettings = new MaterialSettings(
                 SYSTEM_USER_ID, create("http://material-service.example.internal"), ofMillis(1), ofMillis(1), ofMillis(1));
-        materialClient = new MaterialClient(httpClient, materialSettings);
+        materialClient = new MaterialClient(httpClient, new DownloadStatusTable(), materialSettings);
         doReturn(responseThatNeverArrives).when(httpClient).sendAsync(any(), any());
     }
 
@@ -50,6 +53,7 @@ class MaterialClientTest {
                 () -> materialClient.requestDocumentLink(MATERIAL_URI, NOTIFICATION_ID));
 
         assertThat(materialAttachmentException.isRetryable()).isTrue();
+        assertThat(materialAttachmentException.getDependency()).isEqualTo(MATERIAL);
         assertThat(materialAttachmentException.getMessage()).isEqualTo("Material did not answer in time");
         assertThat(materialAttachmentException.getCause()).isInstanceOf(TimeoutException.class);
         assertThat(responseThatNeverArrives.isCancelled()).isTrue();

@@ -200,6 +200,7 @@ When GOV.UK Notify cannot be reached or does not respond, the notification fails
 `provider-unreachable` or `provider-no-response`, without a retry: on a send, GOV.UK Notify may already have
 accepted the email or letter, and a retry could send it twice. The same applies when GOV.UK Notify is asked for
 the notification's status. Only a failed TLS handshake is retried until the retry window ends. When Office 365
-cannot be reached or does not respond, it is retried until the retry window ends first.
+cannot be reached or does not respond, it is retried until the retry window ends first. A connection that
+times out before it is made counts as "could not be reached", not "did not respond".
 
 Each line matches a `notification-validation-failed` or `notification-failed` event on your reply queue.

@@ -29,7 +29,7 @@ import javax.net.ssl.SSLHandshakeException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static uk.gov.hmcts.cp.notification.integration.testdata.TransientFailurePolicyFactory.aFailedNotificationRecorder;
-import static uk.gov.hmcts.cp.notification.integration.testdata.TransientFailurePolicyFactory.aStatusCheckFailureHandler;
+import static uk.gov.hmcts.cp.notification.integration.testdata.TransientFailurePolicyFactory.aGovNotifyFailureHandler;
 import static uk.gov.hmcts.cp.notification.integration.testdata.TransientFailurePolicyFactory.aTransientFailurePolicy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -61,7 +61,7 @@ class CheckEmailStatusTaskTest {
         task = new CheckEmailStatusTask(govNotifyClient, statusService,
                 aTransientFailurePolicy(statusService, taskRetrySchedule),
                 aFailedNotificationRecorder(statusService, taskRetrySchedule),
-                aStatusCheckFailureHandler(statusService, taskRetrySchedule),
+                aGovNotifyFailureHandler(statusService, taskRetrySchedule),
                 taskRetrySchedule, LEGACY_EMAIL_RETRY_DURATIONS);
     }
 
