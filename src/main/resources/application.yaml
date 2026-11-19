@@ -28,6 +28,12 @@ spring:
     # classpath:db/migration is augmented at runtime by cp-task-manager's
     # TaskManagerFlywayAutoConfiguration, which merges classpath:db/taskmanager (the `jobs` table)
     # into this same Flyway run — no manual spring.flyway.locations entry needed (AC-001a).
+  task:
+    scheduling:
+      pool:
+        # cp-task-manager's job poller and the Service Bus readiness peeks are both @Scheduled; with Boot's
+        # default single thread a slow peek (up to the health-check timeout per queue) would hold up the jobs.
+        size: 2
 
 server:
   port: ${SERVER_PORT:8082}
@@ -121,6 +127,9 @@ management:
         # probe (decision log D6). Liveness keeps Boot's default of the application's own state only.
         readiness:
           include: readinessState, db, serviceBus
+      # With no Service Bus configured (local runs, tests that don't need it) there is no serviceBus component;
+      # this lets the readiness group name it anyway instead of failing startup.
+      validate-group-membership: false
   otlp:
     metrics:
       export:

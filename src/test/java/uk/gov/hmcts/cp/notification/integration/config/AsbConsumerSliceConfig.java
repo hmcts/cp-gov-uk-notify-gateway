@@ -9,12 +9,12 @@ import org.springframework.context.annotation.Import;
 import uk.gov.hmcts.cp.notification.messaging.CommandMessageProcessor;
 import uk.gov.hmcts.cp.notification.messaging.SendEmailConsumer;
 import uk.gov.hmcts.cp.notification.messaging.SendLetterConsumer;
-import uk.gov.hmcts.cp.notification.messaging.ServiceBusClientBuilderFactory;
 import uk.gov.hmcts.cp.notification.messaging.ServiceBusConfig;
+import uk.gov.hmcts.cp.notification.time.Clock;
 
 @Configuration
-@Import({ServiceBusConfig.class, ServiceBusClientBuilderFactory.class, CommandMessageProcessor.class,
-        SendEmailConsumer.class, SendLetterConsumer.class})
+@Import({ServiceBusConfig.class, CommandMessageProcessor.class, SendEmailConsumer.class, SendLetterConsumer.class,
+        Clock.class})
 @ImportAutoConfiguration({JacksonAutoConfiguration.class, ValidationAutoConfiguration.class})
 public class AsbConsumerSliceConfig {
 }

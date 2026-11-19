@@ -14,13 +14,11 @@ import uk.gov.hmcts.cp.notification.integration.stubs.MaterialServiceStub;
 import uk.gov.hmcts.cp.notification.integration.stubs.Office365StubService;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.boot.health.contributor.Status.UNKNOWN;
 import static org.springframework.boot.health.contributor.Status.UP;
 
 /**
  * The whole application with no Service Bus configured, as in a local run. Readiness names the "serviceBus"
- * component, and Boot refuses to start if a readiness member doesn't exist, so this proves the stand-in
- * component is registered under that name.
+ * component, which then doesn't exist, so this proves the application still starts and is ready.
  */
 // Closed afterwards, so this application's job poller can't pick up work from the end-to-end tests' database.
 @DirtiesContext
@@ -38,12 +36,11 @@ class ServiceBusNotConfiguredIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void should_start_and_report_service_bus_as_unknown_without_failing_readiness() {
+    void should_start_and_be_ready_without_a_service_bus_component() {
         final CompositeHealthDescriptor readinessHealth =
                 (CompositeHealthDescriptor) healthEndpoint.healthForPath("readiness");
 
         assertThat(readinessHealth.getStatus()).isEqualTo(UP);
-        assertThat(readinessHealth.getComponents()).containsOnlyKeys("readinessState", "db", "serviceBus");
-        assertThat(readinessHealth.getComponents().get("serviceBus").getStatus()).isEqualTo(UNKNOWN);
+        assertThat(readinessHealth.getComponents()).containsOnlyKeys("readinessState", "db");
     }
 }
