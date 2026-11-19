@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import uk.gov.hmcts.cp.notification.logging.Channel;
+import uk.gov.hmcts.cp.notification.logging.NotificationOutcome;
 import uk.gov.hmcts.cp.notification.logging.OutcomeReason;
 import uk.gov.hmcts.cp.notification.persistence.NotificationEntity;
 import uk.gov.hmcts.cp.notification.persistence.NotificationRepository;
@@ -137,7 +138,7 @@ public class NotificationStatusService {
                 notificationId, replyQueue, statusCodeText, outcomeReasonDescription);
         LOG.atWarn()
                 .addKeyValue(REPLY_QUEUE, replyQueue)
-                .addKeyValue(NOTIFICATION_OUTCOME, "failed")
+                .addKeyValue(NOTIFICATION_OUTCOME, NotificationOutcome.FAILED.getFieldValue())
                 .addKeyValue(OUTCOME_REASON, outcomeReasonName)
                 .addKeyValue(NOTIFICATION_CHANNEL, channelName)
                 .log(message);

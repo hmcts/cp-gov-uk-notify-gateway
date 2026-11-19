@@ -12,7 +12,10 @@ import org.slf4j.Logger;
 import org.springframework.stereotype.Component;
 
 import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
+import uk.gov.hmcts.cp.notification.logging.CallOutcome;
+import uk.gov.hmcts.cp.notification.logging.Channel;
 import uk.gov.hmcts.cp.notification.logging.Dependency;
+import uk.gov.hmcts.cp.notification.logging.Operation;
 
 import java.util.UUID;
 
@@ -40,9 +43,9 @@ public class EmailSender {
                 "Sent notification '%s' via '%s' (reference '%s')", notificationId, dependencyName, reference);
         logger.atInfo()
                 .addKeyValue(DEPENDENCY, dependencyName)
-                .addKeyValue(OPERATION, "send")
-                .addKeyValue(CHANNEL, "email")
-                .addKeyValue(OUTCOME, "succeeded")
+                .addKeyValue(OPERATION, Operation.SEND.getFieldValue())
+                .addKeyValue(CHANNEL, Channel.EMAIL.getFieldValue())
+                .addKeyValue(OUTCOME, CallOutcome.SUCCEEDED.getFieldValue())
                 .log(message);
         return sendResult;
     }

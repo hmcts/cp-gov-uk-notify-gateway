@@ -29,19 +29,22 @@ import tools.jackson.databind.ObjectMapper;
 import uk.gov.hmcts.cp.notification.blob.AttachmentDownloader;
 import uk.gov.hmcts.cp.notification.blob.PermanentBlobException;
 import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
+import uk.gov.hmcts.cp.notification.logging.CallOutcome;
+import uk.gov.hmcts.cp.notification.logging.Dependency;
 import uk.gov.hmcts.cp.notification.logging.FailureReason;
 import uk.gov.hmcts.cp.notification.logging.FailureReasonClassifier;
+import uk.gov.hmcts.cp.notification.logging.Operation;
 import uk.gov.hmcts.cp.notification.logging.OutcomeReason;
 import uk.gov.hmcts.cp.notification.logging.OutcomeReasonClassifier;
 import uk.gov.hmcts.cp.notification.material.MaterialAttachmentDownloader;
 import uk.gov.hmcts.cp.notification.material.MaterialAttachmentException;
 import uk.gov.hmcts.cp.notification.sender.Attachment;
-import uk.gov.hmcts.cp.notification.service.NotificationFailure;
 import uk.gov.hmcts.cp.notification.sender.EmailSender;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyFailureClassifier;
 import uk.gov.hmcts.cp.notification.sender.Office365Exception;
 import uk.gov.hmcts.cp.notification.sender.SendResult;
+import uk.gov.hmcts.cp.notification.service.NotificationFailure;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
 import uk.gov.hmcts.cp.taskmanager.service.ExecutionService;
 import uk.gov.hmcts.cp.taskmanager.service.task.ExecutableTask;
@@ -53,9 +56,6 @@ import java.util.UUID;
 
 @Task(SendEmailTask.TASK_NAME)
 @Component
-// Each log line writes its field values out in full, so a search for a value the alerts read finds every line that
-// logs it.
-@SuppressWarnings("PMD.AvoidDuplicateLiterals")
 public class SendEmailTask implements ExecutableTask {
     public static final String TASK_NAME = "SEND_EMAIL";
 
@@ -254,10 +254,10 @@ public class SendEmailTask implements ExecutableTask {
         final String message = format(
                 "Permanent attachment failure for notification '%s' — marking FAILED, no retry", notificationId);
         final LoggingEventBuilder loggingEventBuilder = logger.atWarn()
-                .addKeyValue(DEPENDENCY, "blob-storage")
-                .addKeyValue(OPERATION, "download")
-                .addKeyValue(CHANNEL, "email")
-                .addKeyValue(OUTCOME, "permanent-failure");
+                .addKeyValue(DEPENDENCY, Dependency.BLOB_STORAGE.getFieldValue())
+                .addKeyValue(OPERATION, Operation.DOWNLOAD.getFieldValue())
+                .addKeyValue(CHANNEL, EMAIL.getFieldValue())
+                .addKeyValue(OUTCOME, CallOutcome.PERMANENT_FAILURE.getFieldValue());
         statusCode.ifPresent(code -> loggingEventBuilder.addKeyValue(STATUS_CODE, code));
         loggingEventBuilder.log(message);
     }
@@ -268,10 +268,10 @@ public class SendEmailTask implements ExecutableTask {
                 "Permanent Material attachment failure for notification '%s' ('%s') — marking FAILED, no retry",
                 notificationId, failureMessage);
         final LoggingEventBuilder loggingEventBuilder = logger.atWarn()
-                .addKeyValue(DEPENDENCY, "material")
-                .addKeyValue(OPERATION, "download")
-                .addKeyValue(CHANNEL, "email")
-                .addKeyValue(OUTCOME, "permanent-failure");
+                .addKeyValue(DEPENDENCY, Dependency.MATERIAL.getFieldValue())
+                .addKeyValue(OPERATION, Operation.DOWNLOAD.getFieldValue())
+                .addKeyValue(CHANNEL, EMAIL.getFieldValue())
+                .addKeyValue(OUTCOME, CallOutcome.PERMANENT_FAILURE.getFieldValue());
         statusCode.ifPresent(code -> loggingEventBuilder.addKeyValue(STATUS_CODE, code));
         loggingEventBuilder.log(message);
     }
@@ -283,10 +283,10 @@ public class SendEmailTask implements ExecutableTask {
                 "Permanent send failure for notification '%s' (http '%s') — marking FAILED",
                 notificationId, statusCodeText(statusCode));
         final LoggingEventBuilder loggingEventBuilder = logger.atWarn()
-                .addKeyValue(DEPENDENCY, "gov-uk-notify")
-                .addKeyValue(OPERATION, "send")
-                .addKeyValue(CHANNEL, "email")
-                .addKeyValue(OUTCOME, "permanent-failure");
+                .addKeyValue(DEPENDENCY, Dependency.GOV_UK_NOTIFY.getFieldValue())
+                .addKeyValue(OPERATION, Operation.SEND.getFieldValue())
+                .addKeyValue(CHANNEL, EMAIL.getFieldValue())
+                .addKeyValue(OUTCOME, CallOutcome.PERMANENT_FAILURE.getFieldValue());
         statusCode.ifPresent(code -> loggingEventBuilder.addKeyValue(STATUS_CODE, code));
         failureReason.ifPresent(reason -> loggingEventBuilder.addKeyValue(REASON, reason.getFieldValue()));
         loggingEventBuilder.log(message);
@@ -297,10 +297,10 @@ public class SendEmailTask implements ExecutableTask {
                 "Permanent Office 365 send failure for notification '%s' (http '%s') — marking FAILED",
                 notificationId, statusCodeText(statusCode));
         final LoggingEventBuilder loggingEventBuilder = logger.atWarn()
-                .addKeyValue(DEPENDENCY, "microsoft-365")
-                .addKeyValue(OPERATION, "send")
-                .addKeyValue(CHANNEL, "email")
-                .addKeyValue(OUTCOME, "permanent-failure");
+                .addKeyValue(DEPENDENCY, Dependency.MICROSOFT_365.getFieldValue())
+                .addKeyValue(OPERATION, Operation.SEND.getFieldValue())
+                .addKeyValue(CHANNEL, EMAIL.getFieldValue())
+                .addKeyValue(OUTCOME, CallOutcome.PERMANENT_FAILURE.getFieldValue());
         statusCode.ifPresent(code -> loggingEventBuilder.addKeyValue(STATUS_CODE, code));
         loggingEventBuilder.log(message);
     }

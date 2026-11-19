@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.spi.LoggingEventBuilder;
 import org.springframework.stereotype.Component;
 
+import uk.gov.hmcts.cp.notification.logging.CallOutcome;
 import uk.gov.hmcts.cp.notification.logging.Channel;
 import uk.gov.hmcts.cp.notification.logging.Dependency;
 import uk.gov.hmcts.cp.notification.logging.FailureReason;
@@ -152,7 +153,7 @@ public class TransientFailurePolicy {
                 .addKeyValue(DEPENDENCY, dependencyName)
                 .addKeyValue(OPERATION, operationName)
                 .addKeyValue(CHANNEL, channelName)
-                .addKeyValue(OUTCOME, "transient-failure");
+                .addKeyValue(OUTCOME, CallOutcome.TRANSIENT_FAILURE.getFieldValue());
         httpStatusCode.ifPresent(code -> loggingEventBuilderWithFields.addKeyValue(STATUS_CODE, code));
         failureReason.ifPresent(reason -> loggingEventBuilderWithFields.addKeyValue(REASON, reason.getFieldValue()));
         loggingEventBuilderWithFields.log(message);

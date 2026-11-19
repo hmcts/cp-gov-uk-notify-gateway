@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 
 import uk.gov.hmcts.cp.notification.logging.Channel;
+import uk.gov.hmcts.cp.notification.logging.NotificationOutcome;
 import uk.gov.hmcts.cp.notification.logging.OutcomeReason;
 import uk.gov.hmcts.cp.notification.result.NotificationValidationFailedEvent;
 import uk.gov.hmcts.cp.notification.result.ResultEventPublisher;
@@ -74,7 +75,7 @@ public class ValidationFailureNotifier {
                 channelName, replyQueue, outcomeReasonDescription);
         logger.atWarn()
                 .addKeyValue(REPLY_QUEUE, replyQueue)
-                .addKeyValue(NOTIFICATION_OUTCOME, "rejected")
+                .addKeyValue(NOTIFICATION_OUTCOME, NotificationOutcome.REJECTED.getFieldValue())
                 .addKeyValue(OUTCOME_REASON, outcomeReasonName)
                 .addKeyValue(NOTIFICATION_CHANNEL, channelName)
                 .log(message);

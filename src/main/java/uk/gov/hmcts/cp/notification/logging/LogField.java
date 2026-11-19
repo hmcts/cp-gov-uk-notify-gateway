@@ -9,6 +9,10 @@ package uk.gov.hmcts.cp.notification.logging;
  * {@link #OUTCOME}, and {@link #STATUS_CODE} or {@link #REASON} when there is one. A rejected or failed notification
  * (PEG-3718, PEG-3719) carries {@link #REPLY_QUEUE}, {@link #NOTIFICATION_OUTCOME}, {@link #OUTCOME_REASON} and
  * {@link #NOTIFICATION_CHANNEL}; its names differ from the call's, so the two kinds of line never mix in a query.
+ *
+ * <p>Every value written to these fields comes from an enum's {@code getFieldValue()}: {@link Dependency},
+ * {@link Operation}, {@link Channel}, {@link CallOutcome}, {@link FailureReason}, {@link NotificationOutcome} and
+ * {@link OutcomeReason}, so each value is defined in one place.
  */
 public final class LogField {
     public static final String DEPENDENCY = "dependency";

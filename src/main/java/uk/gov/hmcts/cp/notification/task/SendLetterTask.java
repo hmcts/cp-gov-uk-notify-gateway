@@ -20,8 +20,11 @@ import org.slf4j.spi.LoggingEventBuilder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import uk.gov.hmcts.cp.notification.logging.CallOutcome;
+import uk.gov.hmcts.cp.notification.logging.Dependency;
 import uk.gov.hmcts.cp.notification.logging.FailureReason;
 import uk.gov.hmcts.cp.notification.logging.FailureReasonClassifier;
+import uk.gov.hmcts.cp.notification.logging.Operation;
 import uk.gov.hmcts.cp.notification.logging.OutcomeReason;
 import uk.gov.hmcts.cp.notification.logging.OutcomeReasonClassifier;
 import uk.gov.hmcts.cp.notification.material.MaterialAttachmentDownloader;
@@ -179,10 +182,10 @@ public class SendLetterTask implements ExecutableTask {
         final String message = format(
                 "Sent letter for notification '%s' via Gov.Notify (reference '%s')", notificationId, reference);
         logger.atInfo()
-                .addKeyValue(DEPENDENCY, "gov-uk-notify")
-                .addKeyValue(OPERATION, "send")
-                .addKeyValue(CHANNEL, "letter")
-                .addKeyValue(OUTCOME, "succeeded")
+                .addKeyValue(DEPENDENCY, Dependency.GOV_UK_NOTIFY.getFieldValue())
+                .addKeyValue(OPERATION, Operation.SEND.getFieldValue())
+                .addKeyValue(CHANNEL, LETTER.getFieldValue())
+                .addKeyValue(OUTCOME, CallOutcome.SUCCEEDED.getFieldValue())
                 .log(message);
     }
 
@@ -194,10 +197,10 @@ public class SendLetterTask implements ExecutableTask {
                 "Permanent letter send failure for notification '%s' (http '%s') — marking FAILED",
                 notificationId, statusCodeText.orElse("none"));
         final LoggingEventBuilder loggingEventBuilder = logger.atWarn()
-                .addKeyValue(DEPENDENCY, "gov-uk-notify")
-                .addKeyValue(OPERATION, "send")
-                .addKeyValue(CHANNEL, "letter")
-                .addKeyValue(OUTCOME, "permanent-failure");
+                .addKeyValue(DEPENDENCY, Dependency.GOV_UK_NOTIFY.getFieldValue())
+                .addKeyValue(OPERATION, Operation.SEND.getFieldValue())
+                .addKeyValue(CHANNEL, LETTER.getFieldValue())
+                .addKeyValue(OUTCOME, CallOutcome.PERMANENT_FAILURE.getFieldValue());
         statusCode.ifPresent(code -> loggingEventBuilder.addKeyValue(STATUS_CODE, code));
         failureReason.ifPresent(reason -> loggingEventBuilder.addKeyValue(REASON, reason.getFieldValue()));
         loggingEventBuilder.log(message);
@@ -209,10 +212,10 @@ public class SendLetterTask implements ExecutableTask {
                 "Permanent Material letter download failure for notification '%s' ('%s') — marking FAILED, no retry",
                 notificationId, failureMessage);
         final LoggingEventBuilder loggingEventBuilder = logger.atWarn()
-                .addKeyValue(DEPENDENCY, "material")
-                .addKeyValue(OPERATION, "download")
-                .addKeyValue(CHANNEL, "letter")
-                .addKeyValue(OUTCOME, "permanent-failure");
+                .addKeyValue(DEPENDENCY, Dependency.MATERIAL.getFieldValue())
+                .addKeyValue(OPERATION, Operation.DOWNLOAD.getFieldValue())
+                .addKeyValue(CHANNEL, LETTER.getFieldValue())
+                .addKeyValue(OUTCOME, CallOutcome.PERMANENT_FAILURE.getFieldValue());
         statusCode.ifPresent(code -> loggingEventBuilder.addKeyValue(STATUS_CODE, code));
         loggingEventBuilder.log(message);
     }

@@ -14,9 +14,12 @@ import org.slf4j.Logger;
 import org.slf4j.spi.LoggingEventBuilder;
 import org.springframework.stereotype.Component;
 
+import uk.gov.hmcts.cp.notification.logging.CallOutcome;
 import uk.gov.hmcts.cp.notification.logging.Channel;
+import uk.gov.hmcts.cp.notification.logging.Dependency;
 import uk.gov.hmcts.cp.notification.logging.FailureReason;
 import uk.gov.hmcts.cp.notification.logging.FailureReasonClassifier;
+import uk.gov.hmcts.cp.notification.logging.Operation;
 import uk.gov.hmcts.cp.notification.logging.OutcomeReason;
 import uk.gov.hmcts.cp.notification.logging.OutcomeReasonClassifier;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
@@ -101,10 +104,10 @@ public class GovNotifyStatusCheckFailureHandler {
                 notificationId, httpStatusCodeText.orElse("none"));
         final String channelName = channel.getFieldValue();
         final LoggingEventBuilder loggingEventBuilder = logger.atWarn()
-                .addKeyValue(DEPENDENCY, "gov-uk-notify")
-                .addKeyValue(OPERATION, "status-check")
+                .addKeyValue(DEPENDENCY, Dependency.GOV_UK_NOTIFY.getFieldValue())
+                .addKeyValue(OPERATION, Operation.STATUS_CHECK.getFieldValue())
                 .addKeyValue(CHANNEL, channelName)
-                .addKeyValue(OUTCOME, "permanent-failure");
+                .addKeyValue(OUTCOME, CallOutcome.PERMANENT_FAILURE.getFieldValue());
         httpStatusCode.ifPresent(code -> loggingEventBuilder.addKeyValue(STATUS_CODE, code));
         failureReason.ifPresent(reason -> loggingEventBuilder.addKeyValue(REASON, reason.getFieldValue()));
         loggingEventBuilder.log(message);
