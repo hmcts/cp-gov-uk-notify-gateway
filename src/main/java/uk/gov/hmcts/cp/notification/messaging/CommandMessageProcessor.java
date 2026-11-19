@@ -1,16 +1,21 @@
 package uk.gov.hmcts.cp.notification.messaging;
 
+import static java.util.Optional.empty;
+import static java.util.Optional.of;
+import static org.slf4j.LoggerFactory.getLogger;
+import static org.springframework.util.StringUtils.hasText;
+
 import com.azure.messaging.servicebus.ServiceBusReceivedMessageContext;
 import com.azure.messaging.servicebus.models.DeadLetterOptions;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
+
+import uk.gov.hmcts.cp.notification.logging.Channel;
 
 import java.util.Optional;
 import java.util.Set;
@@ -34,20 +39,20 @@ import java.util.function.BiConsumer;
 public class CommandMessageProcessor {
     public static final String MISSING_REPLY_TO = "MissingReplyTo";
 
-    private static final Logger LOG = LoggerFactory.getLogger(CommandMessageProcessor.class);
+    private static final Logger LOG = getLogger(CommandMessageProcessor.class);
 
     private final ObjectMapper objectMapper;
     private final Validator validator;
     private final ValidationFailureNotifier validationFailureNotifier;
 
     public <T> void process(
-            final ServiceBusReceivedMessageContext context, final Class<T> commandType,
+            final ServiceBusReceivedMessageContext context, final Class<T> commandType, final Channel channel,
             final BiConsumer<T, String> ingest) {
         final String messageId = context.getMessage().getMessageId();
         final String replyTo = context.getMessage().getReplyTo();
-        if (StringUtils.hasText(replyTo)) {
+        if (hasText(replyTo)) {
             final String body = context.getMessage().getBody().toString();
-            final Inbound inbound = new Inbound(context, messageId, replyTo);
+            final Inbound inbound = new Inbound(context, messageId, replyTo, channel);
             read(body, commandType, inbound).ifPresent(command -> validateAndIngest(command, body, ingest, inbound));
         } else {
             LOG.warn("Dead-lettering {} {} with no ReplyTo: the outcome could not be returned",
@@ -59,13 +64,13 @@ public class CommandMessageProcessor {
     }
 
     private <T> Optional<T> read(final String body, final Class<T> commandType, final Inbound inbound) {
-        Optional<T> command = Optional.empty();
+        Optional<T> command = empty();
         try {
-            command = Optional.of(objectMapper.readValue(body, commandType));
+            command = of(objectMapper.readValue(body, commandType));
         } catch (final JacksonException e) {
             LOG.warn("Rejecting unreadable {} {} (cause: {})",
                     commandType.getSimpleName(), inbound.messageId(), e.getClass().getSimpleName());
-            reject(inbound, () -> validationFailureNotifier.notifyUnreadable(inbound.replyTo(), e, body));
+            reject(inbound, () -> validationFailureNotifier.notifyUnreadable(inbound.replyTo(), inbound.channel(), e, body));
         }
         return command;
     }
@@ -80,7 +85,8 @@ public class CommandMessageProcessor {
                     command.getClass().getSimpleName(), inbound.messageId(),
                     ValidationFailureNotifier.describe(violations));
             reject(inbound,
-                    () -> validationFailureNotifier.notifyValidationFailed(inbound.replyTo(), violations, body));
+                    () -> validationFailureNotifier.notifyValidationFailed(
+                            inbound.replyTo(), inbound.channel(), violations, body));
         }
     }
 
@@ -105,6 +111,7 @@ public class CommandMessageProcessor {
         }
     }
 
-    private record Inbound(ServiceBusReceivedMessageContext context, String messageId, String replyTo) {
+    private record Inbound(
+            ServiceBusReceivedMessageContext context, String messageId, String replyTo, Channel channel) {
     }
 }

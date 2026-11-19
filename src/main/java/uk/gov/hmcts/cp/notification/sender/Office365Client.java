@@ -1,9 +1,14 @@
 package uk.gov.hmcts.cp.notification.sender;
 
+import static java.lang.Thread.currentThread;
+import static org.slf4j.LoggerFactory.getLogger;
+import static uk.gov.hmcts.cp.notification.logging.Dependency.MICROSOFT_365;
+
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
+
+import uk.gov.hmcts.cp.notification.logging.Dependency;
 
 import java.io.IOException;
 import java.net.http.HttpClient;
@@ -21,7 +26,7 @@ import java.net.http.HttpTimeoutException;
 public class Office365Client implements EmailClient {
     public static final String OCP_APIM_SUBSCRIPTION_KEY = "Ocp-Apim-Subscription-Key";
 
-    private static final Logger LOG = LoggerFactory.getLogger(Office365Client.class);
+    private static final Logger LOG = getLogger(Office365Client.class);
 
     private static final int HTTP_OK = 200;
 
@@ -39,6 +44,11 @@ public class Office365Client implements EmailClient {
         this.settings = settings;
         this.requestBodyFactory = requestBodyFactory;
         this.responseReader = responseReader;
+    }
+
+    @Override
+    public Dependency dependency() {
+        return MICROSOFT_365;
     }
 
     @Override
@@ -66,7 +76,7 @@ public class Office365Client implements EmailClient {
         } catch (final IOException e) {
             throw new Office365Exception(null, "Office 365 could not be reached", e);
         } catch (final InterruptedException e) {
-            Thread.currentThread().interrupt();
+            currentThread().interrupt();
             throw new Office365Exception(null, "Office 365 request was interrupted", e);
         }
     }

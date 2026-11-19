@@ -1,8 +1,9 @@
 package uk.gov.hmcts.cp.notification.service;
 
+import static org.slf4j.LoggerFactory.getLogger;
+
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,7 +26,7 @@ public class NotificationIngestionService {
     private static final String TYPE_LETTER = "LETTER";
     private static final String STATUS_QUEUED = "QUEUED";
 
-    private static final Logger LOG = LoggerFactory.getLogger(NotificationIngestionService.class);
+    private static final Logger LOG = getLogger(NotificationIngestionService.class);
 
     private final NotificationRepository notificationRepository;
     private final ExecutionService executionService;

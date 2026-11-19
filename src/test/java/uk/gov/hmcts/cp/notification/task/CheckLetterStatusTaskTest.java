@@ -14,6 +14,7 @@ import tools.jackson.databind.json.JsonMapper;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyClient;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
 import uk.gov.hmcts.cp.notification.sender.NotificationStatus;
+import uk.gov.hmcts.cp.notification.service.NotificationFailure;
 import uk.gov.hmcts.cp.notification.service.NotificationStatusService;
 import uk.gov.hmcts.cp.notification.time.Clock;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
@@ -23,15 +24,24 @@ import uk.gov.hmcts.cp.taskmanager.service.ExecutionService;
 import java.util.List;
 import java.util.UUID;
 
+import javax.net.ssl.SSLHandshakeException;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static uk.gov.hmcts.cp.notification.integration.testdata.TransientFailurePolicyFactory.aFailedNotificationRecorder;
+import static uk.gov.hmcts.cp.notification.integration.testdata.TransientFailurePolicyFactory.aStatusCheckFailureHandler;
+import static uk.gov.hmcts.cp.notification.integration.testdata.TransientFailurePolicyFactory.aTransientFailurePolicy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendLetterCommandFactory.LETTER_URL;
+import static uk.gov.hmcts.cp.notification.logging.Channel.LETTER;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.DELIVERY_FAILED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_FAILED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_REJECTED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_UNREACHABLE;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.STATUS_UNKNOWN;
 
 @ExtendWith(MockitoExtension.class)
 class CheckLetterStatusTaskTest {
@@ -53,10 +63,15 @@ class CheckLetterStatusTaskTest {
 
     @BeforeEach
     void createTaskWithLegacyLetterStatusRetryDurations() {
-        final TransientFailurePolicy failurePolicy = new TransientFailurePolicy(statusService, new Clock(), List.of(1L));
-        final LetterStatusPoller poller =
-                new LetterStatusPoller(govNotifyClient, statusService, failurePolicy, executionService, taskFactory);
-        task = new CheckLetterStatusTask(poller, executionService, taskFactory, LEGACY_LETTER_STATUS_RETRY_DURATIONS);
+        final TaskRetrySchedule taskRetrySchedule = new TaskRetrySchedule(new Clock());
+        final TransientFailurePolicy failurePolicy =
+                aTransientFailurePolicy(statusService, taskRetrySchedule);
+        final LetterStatusPoller poller = new LetterStatusPoller(govNotifyClient, statusService, failurePolicy,
+                aFailedNotificationRecorder(statusService, taskRetrySchedule),
+                aStatusCheckFailureHandler(statusService, taskRetrySchedule),
+                taskRetrySchedule, executionService, taskFactory);
+        task = new CheckLetterStatusTask(
+                poller, executionService, taskFactory, taskRetrySchedule, LEGACY_LETTER_STATUS_RETRY_DURATIONS);
     }
 
     @Test
@@ -109,7 +124,7 @@ class CheckLetterStatusTaskTest {
             final ExecutionInfo result = task.execute(checkLetterStatusJob(5));
 
             verify(statusService).markRequeued(notificationId);
-            verify(statusService, never()).markFailed(any(), any(), any());
+            verify(statusService, never()).markFailed(any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
             final ArgumentCaptor<ExecutionInfo> resend = ArgumentCaptor.forClass(ExecutionInfo.class);
             verify(executionService).executeWith(resend.capture());
@@ -124,8 +139,9 @@ class CheckLetterStatusTaskTest {
 
             final ExecutionInfo result = task.execute(checkLetterStatusJob(0));
 
-            verify(statusService).markFailed(notificationId, 400,
-                    "Validation failed for '" + notificationId + "' automatic resend attempt, remaining = 0");
+            verify(statusService).markFailed(new NotificationFailure(notificationId, LETTER, 400,
+                    "Validation failed for '" + notificationId + "' automatic resend attempt, remaining = 0",
+                    DELIVERY_FAILED));
             verify(statusService, never()).markRequeued(any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
             verifyNoInteractions(executionService);
@@ -153,8 +169,16 @@ class CheckLetterStatusTaskTest {
 
             final ExecutionInfo result = task.execute(withRetriesRemaining(checkLetterStatusJob(5), 0));
 
-            verify(statusService).markFailed(eq(notificationId), isNull(), eq(
-                    "Gov.Notify did not reach a terminal status within the retry window (last status 'pending-virus-check')"));
+            final ArgumentCaptor<NotificationFailure> notificationFailureCaptor =
+                    ArgumentCaptor.forClass(NotificationFailure.class);
+            verify(statusService).markFailed(notificationFailureCaptor.capture());
+            final NotificationFailure notificationFailure = notificationFailureCaptor.getValue();
+            assertThat(notificationFailure.notificationId()).isEqualTo(notificationId);
+            assertThat(notificationFailure.channel()).isEqualTo(LETTER);
+            assertThat(notificationFailure.statusCode()).isNull();
+            assertThat(notificationFailure.errorMessage()).isEqualTo(
+                    "Gov.Notify did not reach a terminal status within the retry window (last status 'pending-virus-check')");
+            assertThat(notificationFailure.outcomeReason()).isEqualTo(STATUS_UNKNOWN);
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
     }
@@ -171,8 +195,17 @@ class CheckLetterStatusTaskTest {
 
             final ExecutionInfo result = task.execute(checkLetterStatusJob(5));
 
-            verify(statusService).markFailed(eq(notificationId), isNull(),
-                    eq("Gov.Notify responded with status '" + status.getStatus() + "'"));
+            final ArgumentCaptor<NotificationFailure> notificationFailureCaptor =
+                    ArgumentCaptor.forClass(NotificationFailure.class);
+            verify(statusService).markFailed(notificationFailureCaptor.capture());
+            final NotificationFailure notificationFailure = notificationFailureCaptor.getValue();
+            final String statusText = status.getStatus();
+            assertThat(notificationFailure.notificationId()).isEqualTo(notificationId);
+            assertThat(notificationFailure.channel()).isEqualTo(LETTER);
+            assertThat(notificationFailure.statusCode()).isNull();
+            assertThat(notificationFailure.errorMessage())
+                    .isEqualTo("Gov.Notify responded with status '" + statusText + "'");
+            assertThat(notificationFailure.outcomeReason()).isEqualTo(DELIVERY_FAILED);
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
             verifyNoInteractions(executionService);
         }
@@ -198,8 +231,34 @@ class CheckLetterStatusTaskTest {
 
             task.execute(withRetriesRemaining(checkLetterStatusJob(5), 0));
 
-            verify(statusService).markFailed(notificationId, 500,
-                    "Gov.Notify status polling did not recover within the retry window");
+            verify(statusService).markFailed(new NotificationFailure(notificationId, LETTER, 500,
+                    "Gov.Notify status polling did not recover within the retry window", PROVIDER_FAILED));
+        }
+
+        @Test
+        void should_poll_again_when_the_tls_handshake_with_gov_notify_fails() {
+            final SSLHandshakeException sslHandshakeException = new SSLHandshakeException("handshake failed");
+            when(govNotifyClient.checkStatus(REFERENCE)).thenThrow(new GovNotifyException(
+                    0, "javax.net.ssl.SSLHandshakeException: handshake failed", sslHandshakeException));
+
+            final ExecutionInfo result = task.execute(checkLetterStatusJob(5));
+
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
+            assertThat(result.isShouldRetry()).isTrue();
+            verifyNoInteractions(statusService);
+        }
+
+        @Test
+        void should_mark_failed_saying_gov_notify_could_not_be_reached_when_retries_are_exhausted() {
+            final SSLHandshakeException sslHandshakeException = new SSLHandshakeException("handshake failed");
+            when(govNotifyClient.checkStatus(REFERENCE)).thenThrow(new GovNotifyException(
+                    0, "javax.net.ssl.SSLHandshakeException: handshake failed", sslHandshakeException));
+
+            task.execute(withRetriesRemaining(checkLetterStatusJob(5), 0));
+
+            verify(statusService).markFailed(new NotificationFailure(notificationId, LETTER, null,
+                    "Gov.Notify status polling did not recover within the retry window",
+                    PROVIDER_UNREACHABLE));
         }
 
         @Test
@@ -208,7 +267,8 @@ class CheckLetterStatusTaskTest {
 
             final ExecutionInfo result = task.execute(checkLetterStatusJob(5));
 
-            verify(statusService).markFailed(notificationId, 404, "not found");
+            verify(statusService).markFailed(
+                    new NotificationFailure(notificationId, LETTER, 404, "not found", PROVIDER_REJECTED));
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
     }

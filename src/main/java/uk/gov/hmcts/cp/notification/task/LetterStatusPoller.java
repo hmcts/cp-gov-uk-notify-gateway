@@ -1,14 +1,23 @@
 package uk.gov.hmcts.cp.notification.task;
 
-import static uk.gov.hmcts.cp.notification.sender.GovNotifyFailureClassifier.isTemporary;
+import static java.lang.String.format;
+import static org.slf4j.LoggerFactory.getLogger;
+import static uk.gov.hmcts.cp.notification.logging.Channel.LETTER;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.DELIVERY_FAILED;
+import static uk.gov.hmcts.cp.notification.sender.NotificationStatus.ACCEPTED;
+import static uk.gov.hmcts.cp.notification.sender.NotificationStatus.CREATED;
+import static uk.gov.hmcts.cp.notification.sender.NotificationStatus.INVALID_REQUEST;
+import static uk.gov.hmcts.cp.notification.sender.NotificationStatus.PENDING_VIRUS_CHECK;
+import static uk.gov.hmcts.cp.notification.sender.NotificationStatus.RECEIVED;
+import static uk.gov.hmcts.cp.notification.sender.NotificationStatus.SENDING;
 
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import uk.gov.hmcts.cp.notification.sender.GovNotifyClient;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
 import uk.gov.hmcts.cp.notification.sender.NotificationStatus;
+import uk.gov.hmcts.cp.notification.service.NotificationFailure;
 import uk.gov.hmcts.cp.notification.service.NotificationStatusService;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
 import uk.gov.hmcts.cp.taskmanager.service.ExecutionService;
@@ -27,15 +36,18 @@ import java.util.Set;
  */
 @Component
 public class LetterStatusPoller {
-    private static final Logger LOG = LoggerFactory.getLogger(LetterStatusPoller.class);
+    private static final Logger LOG = getLogger(LetterStatusPoller.class);
 
     private static final int BAD_REQUEST = 400;
     private static final Set<NotificationStatus> IN_PROGRESS =
-            EnumSet.of(NotificationStatus.CREATED, NotificationStatus.SENDING, NotificationStatus.PENDING_VIRUS_CHECK);
+            EnumSet.of(CREATED, SENDING, PENDING_VIRUS_CHECK);
 
     private final GovNotifyClient govNotifyClient;
     private final NotificationStatusService statusService;
     private final TransientFailurePolicy failurePolicy;
+    private final FailedNotificationRecorder failedNotificationRecorder;
+    private final GovNotifyStatusCheckFailureHandler statusCheckFailureHandler;
+    private final TaskRetrySchedule taskRetrySchedule;
     private final ExecutionService executionService;
     private final CpTaskFactory taskFactory;
 
@@ -43,11 +55,17 @@ public class LetterStatusPoller {
             final GovNotifyClient govNotifyClient,
             final NotificationStatusService statusService,
             final TransientFailurePolicy failurePolicy,
+            final FailedNotificationRecorder failedNotificationRecorder,
+            final GovNotifyStatusCheckFailureHandler statusCheckFailureHandler,
+            final TaskRetrySchedule taskRetrySchedule,
             final ExecutionService executionService,
             final CpTaskFactory taskFactory) {
         this.govNotifyClient = govNotifyClient;
         this.statusService = statusService;
         this.failurePolicy = failurePolicy;
+        this.failedNotificationRecorder = failedNotificationRecorder;
+        this.statusCheckFailureHandler = statusCheckFailureHandler;
+        this.taskRetrySchedule = taskRetrySchedule;
         this.executionService = executionService;
         this.taskFactory = taskFactory;
     }
@@ -65,13 +83,14 @@ public class LetterStatusPoller {
         ExecutionInfo result;
         try {
             final NotificationStatus status = govNotifyClient.checkStatus(reference);
-            if (status == NotificationStatus.ACCEPTED) {
+            if (status == ACCEPTED) {
                 result = whenAccepted.handle(letter, reference, executionInfo);
             } else {
                 result = evaluate(status, letter, executionInfo, retryDurationsSecs);
             }
-        } catch (final GovNotifyException e) {
-            result = handlePollFailure(letter, executionInfo, e, retryDurationsSecs);
+        } catch (final GovNotifyException govNotifyException) {
+            result = statusCheckFailureHandler.statusCheckFailed(
+                    letter.notificationId(), LETTER, govNotifyException, executionInfo, retryDurationsSecs);
         }
         return result;
     }
@@ -80,26 +99,29 @@ public class LetterStatusPoller {
     public ExecutionInfo pollAgain(
             final LetterJob letter, final NotificationStatus lastStatus, final ExecutionInfo executionInfo,
             final List<Long> retryDurationsSecs) {
-        return failurePolicy.retryOrFail(letter.notificationId(), null,
-                "Gov.Notify did not reach a terminal status within the retry window (last status '"
-                        + lastStatus.getStatus() + "')", executionInfo, retryDurationsSecs,
-                RetryCause.STILL_IN_PROGRESS);
+        final String exhaustedReason = format(
+                "Gov.Notify did not reach a terminal status within the retry window (last status '%s')",
+                lastStatus.getStatus());
+        return failurePolicy.pollAgainOrFail(
+                letter.notificationId(), LETTER, exhaustedReason, executionInfo, retryDurationsSecs);
     }
 
     private ExecutionInfo evaluate(
             final NotificationStatus status, final LetterJob letter, final ExecutionInfo executionInfo,
             final List<Long> retryDurationsSecs) {
         final ExecutionInfo result;
-        if (status == NotificationStatus.RECEIVED) {
+        if (status == RECEIVED) {
             statusService.markLetterSent(letter.notificationId());
-            result = TransientFailurePolicy.completed(executionInfo);
-        } else if (status == NotificationStatus.INVALID_REQUEST) {
+            result = taskRetrySchedule.completed(executionInfo);
+        } else if (status == INVALID_REQUEST) {
             result = validationFailed(letter, executionInfo);
         } else if (IN_PROGRESS.contains(status)) {
             result = pollAgain(letter, status, executionInfo, retryDurationsSecs);
         } else {
-            result = failurePolicy.fail(letter.notificationId(), null,
-                    "Gov.Notify responded with status '" + status.getStatus() + "'", executionInfo);
+            final String failedReason = format("Gov.Notify responded with status '%s'", status.getStatus());
+            final NotificationFailure notificationFailure =
+                    new NotificationFailure(letter.notificationId(), LETTER, null, failedReason, DELIVERY_FAILED);
+            result = failedNotificationRecorder.recordFailed(notificationFailure, executionInfo);
         }
         return result;
     }
@@ -115,24 +137,13 @@ public class LetterStatusPoller {
                     letter.notificationId(), reason);
             statusService.markRequeued(letter.notificationId());
             executionService.executeWith(taskFactory.createSendLetterJob(letter.forResend()));
-            result = TransientFailurePolicy.completed(executionInfo);
+            result = taskRetrySchedule.completed(executionInfo);
         } else {
-            result = failurePolicy.fail(letter.notificationId(), BAD_REQUEST, reason, executionInfo);
+            final NotificationFailure notificationFailure =
+                    new NotificationFailure(letter.notificationId(), LETTER, BAD_REQUEST, reason, DELIVERY_FAILED);
+            result = failedNotificationRecorder.recordFailed(notificationFailure, executionInfo);
         }
         return result;
     }
 
-    private ExecutionInfo handlePollFailure(
-            final LetterJob letter, final ExecutionInfo executionInfo, final GovNotifyException e,
-            final List<Long> retryDurationsSecs) {
-        final ExecutionInfo result;
-        if (isTemporary(e.getHttpStatus(), e.getMessage())) {
-            result = failurePolicy.retryOrFail(letter.notificationId(), e.getHttpStatus(),
-                    "Gov.Notify status polling did not recover within the retry window", executionInfo,
-                    retryDurationsSecs, RetryCause.STATUS_CHECK);
-        } else {
-            result = failurePolicy.fail(letter.notificationId(), e.getHttpStatus(), e.getMessage(), executionInfo);
-        }
-        return result;
-    }
 }

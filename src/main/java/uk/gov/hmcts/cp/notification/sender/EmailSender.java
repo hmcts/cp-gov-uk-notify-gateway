@@ -1,57 +1,52 @@
 package uk.gov.hmcts.cp.notification.sender;
 
-import com.azure.storage.blob.BlobUrlParts;
+import static java.lang.String.format;
+import static org.slf4j.LoggerFactory.getLogger;
+import static uk.gov.hmcts.cp.notification.logging.LogField.CHANNEL;
+import static uk.gov.hmcts.cp.notification.logging.LogField.DEPENDENCY;
+import static uk.gov.hmcts.cp.notification.logging.LogField.OPERATION;
+import static uk.gov.hmcts.cp.notification.logging.LogField.OUTCOME;
+
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
+import uk.gov.hmcts.cp.notification.logging.CallOutcome;
+import uk.gov.hmcts.cp.notification.logging.Channel;
+import uk.gov.hmcts.cp.notification.logging.Dependency;
+import uk.gov.hmcts.cp.notification.logging.Operation;
 
+import java.util.UUID;
+
+/**
+ * Sends an email through the client that can take it, and logs that it was sent with the fields the provider
+ * outage alert counts (PEG-3720).
+ */
 @Component
 @RequiredArgsConstructor
 public class EmailSender {
-    private static final Logger LOG = LoggerFactory.getLogger(EmailSender.class);
+    private final Logger logger = getLogger(EmailSender.class);
 
+    private final SendEmailRequestMapper sendEmailRequestMapper;
     private final EmailClientFactory emailClientFactory;
 
     public SendResult sendEmail(final SendEmailCommand command, final Attachment attachment) {
-        final SendEmailRequest request = new SendEmailRequest(
-                command.notificationId(),
-                command.templateId(),
-                command.sendToAddress(),
-                command.personalisation(),
-                attachment == null ? null : attachment.content(),
-                attachmentFilename(command, attachment),
-                command.replyToAddress(),
-                command.replyToAddressId());
-
-        final EmailClient client = emailClientFactory.selectFor(request);
-        final SendResult result = client.send(request);
-        LOG.info("Sent notification {} via {} (reference {})",
-                command.notificationId(), client.getClass().getSimpleName(), result.reference());
-        return result;
-    }
-
-    private static String attachmentFilename(final SendEmailCommand command, final Attachment attachment) {
-        String filename = null;
-        if (attachment != null) {
-            filename = attachment.filename() == null ? filenameFrom(command.fileUri()) : attachment.filename();
-        }
-        return filename;
-    }
-
-    private static String filenameFrom(final String fileUri) {
-        String filename = null;
-        if (fileUri != null && !fileUri.isBlank()) {
-            final String blobName = BlobUrlParts.parse(fileUri).getBlobName();
-            if (blobName != null && !blobName.isBlank()) {
-                final String segment = blobName.substring(blobName.lastIndexOf('/') + 1);
-                if (!segment.isBlank()) {
-                    filename = segment;
-                }
-            }
-        }
-        return filename;
+        final SendEmailRequest request = sendEmailRequestMapper.requestFor(command, attachment);
+        final EmailClient emailClient = emailClientFactory.selectFor(request);
+        final SendResult sendResult = emailClient.send(request);
+        final UUID notificationId = command.notificationId();
+        final Dependency dependency = emailClient.dependency();
+        final String dependencyName = dependency.getFieldValue();
+        final String reference = sendResult.reference();
+        final String message = format(
+                "Sent notification '%s' via '%s' (reference '%s')", notificationId, dependencyName, reference);
+        logger.atInfo()
+                .addKeyValue(DEPENDENCY, dependencyName)
+                .addKeyValue(OPERATION, Operation.SEND.getFieldValue())
+                .addKeyValue(CHANNEL, Channel.EMAIL.getFieldValue())
+                .addKeyValue(OUTCOME, CallOutcome.SUCCEEDED.getFieldValue())
+                .log(message);
+        return sendResult;
     }
 }
