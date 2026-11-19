@@ -8,11 +8,13 @@ Feature: Email notification delivery
   the attachment is larger than Gov.UK Notify accepts, the email is sent through Office 365 instead. When
   the attachment cannot be retrieved, the gateway fails the notification rather
   than sending a broken email; a Material document that is only briefly
-  unavailable is retried, and the notification fails only once retries run out. The originating context names a reply
+  unavailable is retried, and the notification fails only once retries run out, while one the gateway may not
+  fetch, or that does not exist, fails straight away. The originating context names a reply
   queue on every command and the gateway returns the outcome to it as a result
   event. A command that cannot be read or fails validation is rejected and the
   reason returned to the originator; a command without a reply queue is set aside unprocessed,
-  because its outcome could not be returned.
+  because its outcome could not be returned. Every rejected or failed notification is logged with
+  its reply queue and a reason, so that the team that owns the queue can be alerted.
 
   Background:
     Given the originator provides a reply queue
@@ -32,6 +34,7 @@ Feature: Email notification delivery
     Then the notification is recorded as FAILED
     And no email is sent via the Gov.UK Notify provider
     And a notification-failed result event is published to the originator's reply queue
+    And the failure is logged for the originator's reply queue as "attachment-not-found"
 
   Scenario: A notification the provider reports as permanently failed is recorded as failed and the outcome returned to the originator
     Given a send-email-notification command for a recipient with an attachment
@@ -40,11 +43,13 @@ Feature: Email notification delivery
     Then the email is sent via the Gov.UK Notify provider
     And the notification is recorded as FAILED
     And a notification-failed result event is published to the originator's reply queue
+    And the failure is logged for the originator's reply queue as "delivery-failed"
 
   Scenario: A notification command that fails validation is rejected and the reason returned to the originator
     Given a send-email-notification command with no recipient address
     When the gateway processes the command
     Then a notification-validation-failed result event saying "sendToAddress: must not be blank" is published to the originator's reply queue
+    And the rejection is logged for the originator's reply queue as "invalid-request"
     And no notification is recorded
     And no email is sent via the Gov.UK Notify provider
 
@@ -52,6 +57,7 @@ Feature: Email notification delivery
     Given a send-email-notification command whose template id cannot be read
     When the gateway processes the command
     Then a notification-validation-failed result event explaining why the command could not be read is published to the originator's reply queue
+    And the rejection is logged for the originator's reply queue as "unreadable-request"
     And no notification is recorded
     And no email is sent via the Gov.UK Notify provider
 
@@ -119,10 +125,11 @@ Feature: Email notification delivery
     And the notification is recorded as SENT
 
   @regression
-  Scenario: A Material document the gateway is not allowed to fetch is failed once retries run out
+  Scenario: A Material document the gateway is not allowed to fetch is failed straight away
     Given a send-email-notification command for a recipient with a Material document the gateway is not allowed to fetch
     When the gateway processes the command
     Then the notification is recorded as FAILED
-    And the Material service is asked for the document again on each retry
+    And the Material service is asked for the document only once
     And no email is sent via the Gov.UK Notify provider
     And a notification-failed result event with status 403 is published to the originator's reply queue
+    And the failure is logged for the originator's reply queue as "attachment-access-refused"

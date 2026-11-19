@@ -106,13 +106,30 @@ class MaterialAttachmentDownloaderIntegrationTest {
             assertFailure(status, false);
             material.documentWasNotDownloaded();
         }
+
+        @ParameterizedTest
+        @ValueSource(ints = {401, 403})
+        void fails_permanently_saying_access_was_refused_when_material_refuses_access(final int status) {
+            material.materialWillAnswer(materialId, status);
+
+            assertFailure(status, false, "Material refused access to the document (HTTP " + status + ")");
+            material.documentWasNotDownloaded();
+        }
+
+        @Test
+        void fails_permanently_saying_there_is_no_such_document_when_material_does_not_have_it() {
+            material.materialWillAnswer(materialId, 404);
+
+            assertFailure(404, false, "Material has no such document (HTTP 404)");
+            material.documentWasNotDownloaded();
+        }
     }
 
     @Nested
     class WhenMaterialCannotServeTheDocumentYet {
 
         @ParameterizedTest
-        @ValueSource(ints = {401, 403, 404, 409, 500, 503})
+        @ValueSource(ints = {409, 500, 503})
         void fails_retryably_with_the_status_material_returned(final int status) {
             material.materialWillAnswer(materialId, status);
 
@@ -165,10 +182,29 @@ class MaterialAttachmentDownloaderIntegrationTest {
     }
 
     @Nested
+    class WhenStorageRefusesTheDocument {
+
+        @ParameterizedTest
+        @ValueSource(ints = {401, 403})
+        void fails_permanently_saying_access_was_refused_when_storage_refuses_access(final int status) {
+            material.documentLinkWillAnswer(materialId, FILENAME, status);
+
+            assertFailure(status, false, "Access to the Material document was refused (HTTP " + status + ")");
+        }
+
+        @Test
+        void fails_permanently_saying_the_document_was_not_found_when_storage_does_not_have_it() {
+            material.documentLinkWillAnswer(materialId, FILENAME, 404);
+
+            assertFailure(404, false, "The Material document was not found (HTTP 404)");
+        }
+    }
+
+    @Nested
     class WhenTheDocumentCannotBeDownloadedYet {
 
         @ParameterizedTest
-        @ValueSource(ints = {400, 403, 404, 500, 503})
+        @ValueSource(ints = {400, 500, 503})
         void fails_retryably_with_the_status_storage_returned(final int status) {
             material.documentLinkWillAnswer(materialId, FILENAME, status);
 
@@ -215,6 +251,14 @@ class MaterialAttachmentDownloaderIntegrationTest {
                     .hasMessage("The Material document passed the maximum attachment size of "
                             + (DOCUMENT.length - 1) + " bytes while downloading");
         }
+    }
+
+    private void assertFailure(final Integer status, final boolean retryable, final String message) {
+        assertThatThrownBy(() -> downloader().download(material.materialClientLinkFor(materialId), notificationId))
+                .isInstanceOf(MaterialAttachmentException.class)
+                .hasMessage(message)
+                .hasFieldOrPropertyWithValue("statusCode", status)
+                .hasFieldOrPropertyWithValue("retryable", retryable);
     }
 
     private void assertFailure(final Integer status, final boolean retryable) {

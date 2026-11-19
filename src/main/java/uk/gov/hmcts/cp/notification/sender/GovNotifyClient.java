@@ -1,6 +1,11 @@
 package uk.gov.hmcts.cp.notification.sender;
 
+import static uk.gov.hmcts.cp.notification.logging.Dependency.GOV_UK_NOTIFY;
+import static uk.gov.hmcts.cp.notification.sender.NotificationStatus.fromStatus;
+
 import org.springframework.stereotype.Component;
+
+import uk.gov.hmcts.cp.notification.logging.Dependency;
 
 import uk.gov.service.notify.LetterResponse;
 import uk.gov.service.notify.Notification;
@@ -23,6 +28,11 @@ public class GovNotifyClient implements EmailClient {
 
     public GovNotifyClient(final NotificationClient notificationClient) {
         this.notificationClient = notificationClient;
+    }
+
+    @Override
+    public Dependency dependency() {
+        return GOV_UK_NOTIFY;
     }
 
     @Override
@@ -67,7 +77,7 @@ public class GovNotifyClient implements EmailClient {
     public NotificationStatus checkStatus(final String reference) {
         try {
             final Notification notification = notificationClient.getNotificationById(reference);
-            return NotificationStatus.fromStatus(notification.getStatus());
+            return fromStatus(notification.getStatus());
         } catch (final NotificationClientException e) {
             throw new GovNotifyException(e.getHttpResult(), e.getMessage(), e);
         }

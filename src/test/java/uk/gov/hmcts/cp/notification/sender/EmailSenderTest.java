@@ -1,155 +1,91 @@
 package uk.gov.hmcts.cp.notification.sender;
 
+import static ch.qos.logback.classic.Level.INFO;
+import static java.util.UUID.fromString;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
+import static uk.gov.hmcts.cp.notification.integration.testdata.AttachmentFactory.aFileAttachment;
+import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.aSendEmailCommand;
+import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailRequestFactory.aSendEmailRequest;
+import static uk.gov.hmcts.cp.notification.integration.testdata.SendResultFactory.aSendResult;
+import static uk.gov.hmcts.cp.notification.logging.CapturedLogs.captureLogsOf;
+import static uk.gov.hmcts.cp.notification.logging.Dependency.MICROSOFT_365;
+
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Captor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.event.KeyValuePair;
 
-import java.nio.charset.StandardCharsets;
-import java.util.UUID;
+import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
+import uk.gov.hmcts.cp.notification.logging.CapturedLogs;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-import static uk.gov.hmcts.cp.notification.integration.testdata.AttachmentFactory.MATERIAL_DOCUMENT_FILENAME;
-import static uk.gov.hmcts.cp.notification.integration.testdata.AttachmentFactory.aFileAttachment;
-import static uk.gov.hmcts.cp.notification.integration.testdata.AttachmentFactory.aMaterialDocumentAttachment;
-import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.aSendEmailCommand;
-import static uk.gov.hmcts.cp.notification.integration.testdata.SendResultFactory.aSendResult;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @ExtendWith(MockitoExtension.class)
 class EmailSenderTest {
-
     @Mock
-    private EmailClientFactory senderFactory;
+    private SendEmailRequestMapper sendEmailRequestMapper;
+    @Mock
+    private EmailClientFactory emailClientFactory;
     @Mock
     private EmailClient emailClient;
 
-    @InjectMocks
     private EmailSender emailSender;
 
-    @Captor
-    private ArgumentCaptor<SendEmailRequest> requestCaptor;
-
-    @Test
-    void routes_the_request_built_from_the_command_and_attachment_to_the_selected_client() {
-        final UUID id = UUID.randomUUID();
-        final byte[] attachment = "report".getBytes(StandardCharsets.UTF_8);
-        when(senderFactory.selectFor(any(SendEmailRequest.class))).thenReturn(emailClient);
-        when(emailClient.send(any(SendEmailRequest.class))).thenReturn(aSendResult().reference("ref-1").build());
-
-        final SendResult result = emailSender.sendEmail(
-                aSendEmailCommand().notificationId(id).sendToAddress("user@example.com").build(),
-                aFileAttachment(attachment));
-
-        verify(senderFactory).selectFor(requestCaptor.capture());
-        assertThat(requestCaptor.getValue().notificationId()).isEqualTo(id);
-        assertThat(requestCaptor.getValue().emailAddress()).isEqualTo("user@example.com");
-        assertThat(requestCaptor.getValue().attachment()).isEqualTo(attachment);
-        assertThat(result.reference()).isEqualTo("ref-1");
+    @BeforeEach
+    void createEmailSenderWithMockedClients() {
+        emailSender = new EmailSender(sendEmailRequestMapper, emailClientFactory);
     }
 
     @Test
-    void sends_a_request_with_no_attachment_when_none_is_supplied() {
-        final UUID id = UUID.randomUUID();
-        when(senderFactory.selectFor(any(SendEmailRequest.class))).thenReturn(emailClient);
-        when(emailClient.send(any(SendEmailRequest.class))).thenReturn(aSendResult().build());
+    void should_send_the_request_through_the_client_that_can_take_it_and_log_the_send() {
+        final SendEmailCommand command =
+                aSendEmailCommand().notificationId(fromString("0f8c2b6e-1d4a-4c57-9b1e-3a2d5f6e7c80")).build();
+        final Attachment attachment = aFileAttachment();
+        final SendEmailRequest request = aSendEmailRequest().build();
+        final SendResult sendResult = aSendResult().reference("ref-1").build();
+        when(sendEmailRequestMapper.requestFor(command, attachment)).thenReturn(request);
+        when(emailClientFactory.selectFor(request)).thenReturn(emailClient);
+        when(emailClient.send(request)).thenReturn(sendResult);
+        when(emailClient.dependency()).thenReturn(MICROSOFT_365);
 
-        emailSender.sendEmail(aSendEmailCommand().notificationId(id).build(), null);
+        final SendResult result;
+        final ILoggingEvent loggingEvent;
+        try (CapturedLogs capturedLogs = captureLogsOf(EmailSender.class)) {
+            result = emailSender.sendEmail(command, attachment);
+            loggingEvent = onlyEventIn(capturedLogs);
+        }
 
-        verify(senderFactory).selectFor(requestCaptor.capture());
-        assertThat(requestCaptor.getValue().attachment()).isNull();
+        assertThat(result).isSameAs(sendResult);
+        assertThat(loggingEvent.getLevel()).isEqualTo(INFO);
+        final String message = loggingEvent.getFormattedMessage();
+        assertThat(message).isEqualTo(
+                "Sent notification '0f8c2b6e-1d4a-4c57-9b1e-3a2d5f6e7c80' via 'microsoft-365' (reference 'ref-1')");
+        final Map<String, Object> fields = fieldsOf(loggingEvent);
+        assertThat(fields).hasSize(4);
+        assertThat(fields.get("dependency")).isEqualTo("microsoft-365");
+        assertThat(fields.get("operation")).isEqualTo("send");
+        assertThat(fields.get("channel")).isEqualTo("email");
+        assertThat(fields.get("outcome")).isEqualTo("succeeded");
     }
 
-    @Test
-    void uses_the_filename_reported_by_the_download_rather_than_deriving_one_from_the_file_uri() {
-        stubClient();
-        final Attachment document = aMaterialDocumentAttachment();
-
-        emailSender.sendEmail(aSendEmailCommand().fileUri(
-                "https://sa.blob.core.windows.net/mi-reportdata/report.csv").build(), document);
-
-        verify(senderFactory).selectFor(requestCaptor.capture());
-        assertThat(requestCaptor.getValue().attachment()).isEqualTo(document.content());
-        assertThat(requestCaptor.getValue().attachmentFilename()).isEqualTo(MATERIAL_DOCUMENT_FILENAME);
+    private ILoggingEvent onlyEventIn(final CapturedLogs capturedLogs) {
+        final List<ILoggingEvent> loggingEvents = capturedLogs.events();
+        assertThat(loggingEvents).hasSize(1);
+        return loggingEvents.getFirst();
     }
 
-    @Test
-    void derives_the_attachment_filename_from_the_last_segment_of_the_blob_uri() {
-        stubClient();
-
-        emailSender.sendEmail(aSendEmailCommand().fileUri(
-                "https://sa.blob.core.windows.net/mi-reportdata/2026/07/report.csv").build(), someAttachment());
-
-        verify(senderFactory).selectFor(requestCaptor.capture());
-        assertThat(requestCaptor.getValue().attachmentFilename()).isEqualTo("report.csv");
-    }
-
-    @Test
-    void percent_decodes_the_attachment_filename() {
-        stubClient();
-
-        emailSender.sendEmail(aSendEmailCommand().fileUri(
-                "https://sa.blob.core.windows.net/mi-reportdata/report%20final.csv").build(), someAttachment());
-
-        verify(senderFactory).selectFor(requestCaptor.capture());
-        assertThat(requestCaptor.getValue().attachmentFilename()).isEqualTo("report final.csv");
-    }
-
-    @Test
-    void ignores_the_sas_query_string_when_deriving_the_attachment_filename() {
-        stubClient();
-
-        emailSender.sendEmail(aSendEmailCommand().fileUri(
-                "https://sa.blob.core.windows.net/mi-reportdata/report.csv?sv=2020-04-08&sig=abc%3D").build(),
-                someAttachment());
-
-        verify(senderFactory).selectFor(requestCaptor.capture());
-        assertThat(requestCaptor.getValue().attachmentFilename()).isEqualTo("report.csv");
-    }
-
-    @Test
-    void derives_no_attachment_filename_when_the_file_uri_is_blank() {
-        stubClient();
-
-        emailSender.sendEmail(aSendEmailCommand().fileUri("  ").build(), someAttachment());
-
-        verify(senderFactory).selectFor(requestCaptor.capture());
-        assertThat(requestCaptor.getValue().attachmentFilename()).isNull();
-    }
-
-    @Test
-    void derives_no_attachment_filename_when_the_uri_addresses_a_container_with_no_blob() {
-        stubClient();
-
-        emailSender.sendEmail(aSendEmailCommand().fileUri(
-                "https://sa.blob.core.windows.net/mi-reportdata").build(), someAttachment());
-
-        verify(senderFactory).selectFor(requestCaptor.capture());
-        assertThat(requestCaptor.getValue().attachmentFilename()).isNull();
-    }
-
-    @Test
-    void derives_no_attachment_filename_when_the_blob_name_is_a_directory_marker() {
-        stubClient();
-
-        emailSender.sendEmail(aSendEmailCommand().fileUri(
-                "https://sa.blob.core.windows.net/mi-reportdata/2026/07/").build(), someAttachment());
-
-        verify(senderFactory).selectFor(requestCaptor.capture());
-        assertThat(requestCaptor.getValue().attachmentFilename()).isNull();
-    }
-
-    private void stubClient() {
-        when(senderFactory.selectFor(any(SendEmailRequest.class))).thenReturn(emailClient);
-        when(emailClient.send(any(SendEmailRequest.class))).thenReturn(aSendResult().build());
-    }
-
-    private static Attachment someAttachment() {
-        return aFileAttachment();
+    private Map<String, Object> fieldsOf(final ILoggingEvent loggingEvent) {
+        final Map<String, Object> fields = new HashMap<>();
+        final List<KeyValuePair> keyValuePairs = loggingEvent.getKeyValuePairs();
+        for (final KeyValuePair keyValuePair : keyValuePairs) {
+            fields.put(keyValuePair.key, keyValuePair.value);
+        }
+        return fields;
     }
 }

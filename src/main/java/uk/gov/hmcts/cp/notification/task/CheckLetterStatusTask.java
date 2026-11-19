@@ -1,5 +1,8 @@
 package uk.gov.hmcts.cp.notification.task;
 
+import static java.util.List.copyOf;
+import static java.util.Optional.of;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -24,29 +27,32 @@ public class CheckLetterStatusTask implements ExecutableTask {
     private final LetterStatusPoller poller;
     private final ExecutionService executionService;
     private final CpTaskFactory taskFactory;
+    private final TaskRetrySchedule taskRetrySchedule;
     private final List<Long> retryDurationsSecs;
 
     public CheckLetterStatusTask(
             final LetterStatusPoller poller,
             final ExecutionService executionService,
             final CpTaskFactory taskFactory,
+            final TaskRetrySchedule taskRetrySchedule,
             @Value("${cp.notification.retry.letter-status-durations-secs}") final List<Long> retryDurationsSecs) {
         this.poller = poller;
         this.executionService = executionService;
         this.taskFactory = taskFactory;
-        this.retryDurationsSecs = List.copyOf(retryDurationsSecs);
+        this.taskRetrySchedule = taskRetrySchedule;
+        this.retryDurationsSecs = copyOf(retryDurationsSecs);
     }
 
     @Override
     public ExecutionInfo execute(final ExecutionInfo executionInfo) {
         return poller.poll(executionInfo, retryDurationsSecs, (letter, reference, current) -> {
             executionService.executeWith(taskFactory.createCheckAcceptedLetterStatusJob(letter, reference));
-            return TransientFailurePolicy.completed(current);
+            return taskRetrySchedule.completed(current);
         });
     }
 
     @Override
     public Optional<List<Long>> getRetryDurationsInSecs() {
-        return Optional.of(retryDurationsSecs);
+        return of(retryDurationsSecs);
     }
 }

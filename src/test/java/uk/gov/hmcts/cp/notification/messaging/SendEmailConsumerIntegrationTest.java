@@ -34,6 +34,7 @@ import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommand
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.aSendEmailCommand;
 import static uk.gov.hmcts.cp.notification.integration.testdata.SendEmailCommandFactory.aSendEmailCommandWithMaterialUrl;
 import static uk.gov.hmcts.cp.notification.messaging.CommandMessageProcessor.MISSING_REPLY_TO;
+import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
 
 class SendEmailConsumerIntegrationTest extends AbstractAsbConsumerSliceTest {
 
@@ -91,7 +92,7 @@ class SendEmailConsumerIntegrationTest extends AbstractAsbConsumerSliceTest {
 
             final ArgumentCaptor<Set<ConstraintViolation<SendEmailCommand>>> violations = ArgumentCaptor.captor();
             verify(validationFailureNotifier, timeout(TIMEOUT.toMillis()))
-                    .notifyValidationFailed(eq(REPLY_TO), violations.capture(), eq(body));
+                    .notifyValidationFailed(eq(REPLY_TO), eq(EMAIL), violations.capture(), eq(body));
             assertThat(violations.getValue())
                     .extracting(violation -> violation.getPropertyPath().toString())
                     .containsExactlyInAnyOrder("notificationId", "templateId");
@@ -103,10 +104,10 @@ class SendEmailConsumerIntegrationTest extends AbstractAsbConsumerSliceTest {
             asb.sendToCommandQueue("{\"sendToAddress\":\"user@example.com\"}", REPLY_TO);
 
             verify(validationFailureNotifier, timeout(TIMEOUT.toMillis()))
-                    .notifyValidationFailed(eq(REPLY_TO), any(), any());
+                    .notifyValidationFailed(eq(REPLY_TO), eq(EMAIL), any(), any());
             await().during(Duration.ofSeconds(3)).atMost(Duration.ofSeconds(5))
                     .until(() -> asb.peekDeadLetter() == null);
-            verify(validationFailureNotifier, times(1)).notifyValidationFailed(eq(REPLY_TO), any(), any());
+            verify(validationFailureNotifier, times(1)).notifyValidationFailed(eq(REPLY_TO), eq(EMAIL), any(), any());
         }
 
         @Test
@@ -114,19 +115,19 @@ class SendEmailConsumerIntegrationTest extends AbstractAsbConsumerSliceTest {
             asb.sendToCommandQueue("this is not json", REPLY_TO);
 
             verify(validationFailureNotifier, timeout(TIMEOUT.toMillis()))
-                    .notifyUnreadable(eq(REPLY_TO), any(), eq("this is not json"));
+                    .notifyUnreadable(eq(REPLY_TO), eq(EMAIL), any(), eq("this is not json"));
             verifyNoInteractions(ingestionService);
         }
 
         @Test
         void abandons_and_redelivers_a_command_that_fails_validation_when_reporting_it_fails() {
             doThrow(new IllegalStateException("reply queue unavailable")).when(validationFailureNotifier)
-                    .notifyValidationFailed(any(), any(), any());
+                    .notifyValidationFailed(any(), any(), any(), any());
 
             asb.sendToCommandQueue("{\"sendToAddress\":\"user@example.com\"}", REPLY_TO);
 
             verify(validationFailureNotifier, timeout(TIMEOUT.toMillis()).atLeast(2))
-                    .notifyValidationFailed(eq(REPLY_TO), any(), any());
+                    .notifyValidationFailed(eq(REPLY_TO), eq(EMAIL), any(), any());
             await().atMost(TIMEOUT).until(() -> asb.peekDeadLetter() != null);
             verifyNoInteractions(ingestionService);
         }
@@ -134,12 +135,12 @@ class SendEmailConsumerIntegrationTest extends AbstractAsbConsumerSliceTest {
         @Test
         void abandons_and_redelivers_an_unparseable_message_when_reporting_it_fails() {
             doThrow(new IllegalStateException("reply queue unavailable")).when(validationFailureNotifier)
-                    .notifyUnreadable(any(), any(), any());
+                    .notifyUnreadable(any(), any(), any(), any());
 
             asb.sendToCommandQueue("this is not json", REPLY_TO);
 
             verify(validationFailureNotifier, timeout(TIMEOUT.toMillis()).atLeast(2))
-                    .notifyUnreadable(eq(REPLY_TO), any(), any());
+                    .notifyUnreadable(eq(REPLY_TO), eq(EMAIL), any(), any());
             await().atMost(TIMEOUT).until(() -> asb.peekDeadLetter() != null);
             verifyNoInteractions(ingestionService);
         }

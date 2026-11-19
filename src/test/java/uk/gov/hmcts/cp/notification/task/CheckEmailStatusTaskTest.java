@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -13,6 +14,7 @@ import uk.gov.hmcts.cp.notification.sender.GovNotifyClient;
 import uk.gov.hmcts.cp.notification.sender.GovNotifyException;
 import uk.gov.hmcts.cp.notification.sender.NotificationStatus;
 import uk.gov.hmcts.cp.notification.service.NotificationEmailDetails;
+import uk.gov.hmcts.cp.notification.service.NotificationFailure;
 import uk.gov.hmcts.cp.notification.service.NotificationStatusService;
 import uk.gov.hmcts.cp.notification.time.Clock;
 import uk.gov.hmcts.cp.taskmanager.domain.ExecutionInfo;
@@ -23,14 +25,23 @@ import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.UUID;
 
+import javax.net.ssl.SSLHandshakeException;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static uk.gov.hmcts.cp.notification.integration.testdata.TransientFailurePolicyFactory.aFailedNotificationRecorder;
+import static uk.gov.hmcts.cp.notification.integration.testdata.TransientFailurePolicyFactory.aStatusCheckFailureHandler;
+import static uk.gov.hmcts.cp.notification.integration.testdata.TransientFailurePolicyFactory.aTransientFailurePolicy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.DELIVERY_FAILED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_FAILED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_REJECTED;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.PROVIDER_UNREACHABLE;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.STATUS_UNKNOWN;
 
 @ExtendWith(MockitoExtension.class)
 class CheckEmailStatusTaskTest {
@@ -45,10 +56,13 @@ class CheckEmailStatusTaskTest {
     private CheckEmailStatusTask task;
 
     @BeforeEach
-    void setUp() {
+    void createTaskWithLegacyEmailRetryDurations() {
+        final TaskRetrySchedule taskRetrySchedule = new TaskRetrySchedule(new Clock());
         task = new CheckEmailStatusTask(govNotifyClient, statusService,
-                new TransientFailurePolicy(statusService, new Clock(), LEGACY_EMAIL_RETRY_DURATIONS),
-                LEGACY_EMAIL_RETRY_DURATIONS);
+                aTransientFailurePolicy(statusService, taskRetrySchedule),
+                aFailedNotificationRecorder(statusService, taskRetrySchedule),
+                aStatusCheckFailureHandler(statusService, taskRetrySchedule),
+                taskRetrySchedule, LEGACY_EMAIL_RETRY_DURATIONS);
     }
 
     @Test
@@ -93,8 +107,16 @@ class CheckEmailStatusTaskTest {
 
             final ExecutionInfo result = task.execute(checkStatusJob(id, reference));
 
-            verify(statusService).markFailed(eq(id), isNull(),
-                    eq("Gov.Notify responded with status 'permanent-failure'"));
+            final ArgumentCaptor<NotificationFailure> notificationFailureCaptor =
+                    ArgumentCaptor.forClass(NotificationFailure.class);
+            verify(statusService).markFailed(notificationFailureCaptor.capture());
+            final NotificationFailure notificationFailure = notificationFailureCaptor.getValue();
+            assertThat(notificationFailure.notificationId()).isEqualTo(id);
+            assertThat(notificationFailure.channel()).isEqualTo(EMAIL);
+            assertThat(notificationFailure.statusCode()).isNull();
+            assertThat(notificationFailure.errorMessage())
+                    .isEqualTo("Gov.Notify responded with status 'permanent-failure'");
+            assertThat(notificationFailure.outcomeReason()).isEqualTo(DELIVERY_FAILED);
             verify(statusService, never()).markSent(any(), any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
@@ -107,8 +129,16 @@ class CheckEmailStatusTaskTest {
 
             final ExecutionInfo result = task.execute(checkStatusJob(id, reference));
 
-            verify(statusService).markFailed(eq(id), isNull(),
-                    eq("Gov.Notify responded with status 'temporary-failure'"));
+            final ArgumentCaptor<NotificationFailure> notificationFailureCaptor =
+                    ArgumentCaptor.forClass(NotificationFailure.class);
+            verify(statusService).markFailed(notificationFailureCaptor.capture());
+            final NotificationFailure notificationFailure = notificationFailureCaptor.getValue();
+            assertThat(notificationFailure.notificationId()).isEqualTo(id);
+            assertThat(notificationFailure.channel()).isEqualTo(EMAIL);
+            assertThat(notificationFailure.statusCode()).isNull();
+            assertThat(notificationFailure.errorMessage())
+                    .isEqualTo("Gov.Notify responded with status 'temporary-failure'");
+            assertThat(notificationFailure.outcomeReason()).isEqualTo(DELIVERY_FAILED);
             verify(statusService, never()).markSent(any(), any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
@@ -121,8 +151,16 @@ class CheckEmailStatusTaskTest {
 
             final ExecutionInfo result = task.execute(checkStatusJobWithRetriesRemaining(id, reference, 0));
 
-            verify(statusService).markFailed(eq(id), isNull(),
-                    eq("Gov.Notify did not reach a terminal status within the retry window (last status 'sending')"));
+            final ArgumentCaptor<NotificationFailure> notificationFailureCaptor =
+                    ArgumentCaptor.forClass(NotificationFailure.class);
+            verify(statusService).markFailed(notificationFailureCaptor.capture());
+            final NotificationFailure notificationFailure = notificationFailureCaptor.getValue();
+            assertThat(notificationFailure.notificationId()).isEqualTo(id);
+            assertThat(notificationFailure.channel()).isEqualTo(EMAIL);
+            assertThat(notificationFailure.statusCode()).isNull();
+            assertThat(notificationFailure.errorMessage())
+                    .isEqualTo("Gov.Notify did not reach a terminal status within the retry window (last status 'sending')");
+            assertThat(notificationFailure.outcomeReason()).isEqualTo(STATUS_UNKNOWN);
             verify(statusService, never()).markSent(any(), any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
@@ -154,9 +192,48 @@ class CheckEmailStatusTaskTest {
 
             final ExecutionInfo result = task.execute(checkStatusJobWithRetriesRemaining(id, reference, 0));
 
-            verify(statusService).markFailed(eq(id), eq(500),
-                    eq("Gov.Notify status polling did not recover within the retry window"));
+            final ArgumentCaptor<NotificationFailure> notificationFailureCaptor =
+                    ArgumentCaptor.forClass(NotificationFailure.class);
+            verify(statusService).markFailed(notificationFailureCaptor.capture());
+            final NotificationFailure notificationFailure = notificationFailureCaptor.getValue();
+            assertThat(notificationFailure.notificationId()).isEqualTo(id);
+            assertThat(notificationFailure.channel()).isEqualTo(EMAIL);
+            assertThat(notificationFailure.statusCode()).isEqualTo(500);
+            assertThat(notificationFailure.errorMessage())
+                    .isEqualTo("Gov.Notify status polling did not recover within the retry window");
+            assertThat(notificationFailure.outcomeReason()).isEqualTo(PROVIDER_FAILED);
             verify(statusService, never()).markSent(any(), any());
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
+        }
+
+        @Test
+        void should_re_poll_when_the_tls_handshake_with_gov_uk_notify_fails() {
+            final UUID id = UUID.randomUUID();
+            final String reference = "notify-ref-123";
+            final SSLHandshakeException sslHandshakeException = new SSLHandshakeException("handshake failed");
+            when(govNotifyClient.checkStatus(reference)).thenThrow(new GovNotifyException(
+                    0, "javax.net.ssl.SSLHandshakeException: handshake failed", sslHandshakeException));
+
+            final ExecutionInfo result = task.execute(checkStatusJob(id, reference));
+
+            verifyNoInteractions(statusService);
+            assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.INPROGRESS);
+            assertThat(result.isShouldRetry()).isTrue();
+        }
+
+        @Test
+        void should_mark_failed_saying_gov_uk_notify_could_not_be_reached_when_retries_are_exhausted() {
+            final UUID id = UUID.randomUUID();
+            final String reference = "notify-ref-123";
+            final SSLHandshakeException sslHandshakeException = new SSLHandshakeException("handshake failed");
+            when(govNotifyClient.checkStatus(reference)).thenThrow(new GovNotifyException(
+                    0, "javax.net.ssl.SSLHandshakeException: handshake failed", sslHandshakeException));
+
+            final ExecutionInfo result = task.execute(checkStatusJobWithRetriesRemaining(id, reference, 0));
+
+            verify(statusService).markFailed(new NotificationFailure(id, EMAIL, null,
+                    "Gov.Notify status polling did not recover within the retry window",
+                    PROVIDER_UNREACHABLE));
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }
 
@@ -169,7 +246,7 @@ class CheckEmailStatusTaskTest {
 
             final ExecutionInfo result = task.execute(checkStatusJob(id, reference));
 
-            verify(statusService).markFailed(id, 400, "bad request");
+            verify(statusService).markFailed(new NotificationFailure(id, EMAIL, 400, "bad request", PROVIDER_REJECTED));
             verify(statusService, never()).markSent(any(), any());
             assertThat(result.getExecutionStatus()).isEqualTo(ExecutionStatus.COMPLETED);
         }

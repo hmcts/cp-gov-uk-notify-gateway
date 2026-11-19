@@ -1,8 +1,11 @@
 package uk.gov.hmcts.cp.notification.task;
 
+import static java.util.Optional.of;
+import static java.util.UUID.fromString;
+import static org.slf4j.LoggerFactory.getLogger;
+
 import jakarta.json.JsonObject;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -32,15 +35,18 @@ public class RecordSentTask implements ExecutableTask {
     public static final String KEY_EMAIL_BODY = "emailBody";
     public static final String KEY_REPLY_TO_ADDRESS = "replyToAddress";
 
-    private static final Logger LOG = LoggerFactory.getLogger(RecordSentTask.class);
+    private static final Logger LOG = getLogger(RecordSentTask.class);
 
     private final NotificationStatusService statusService;
+    private final TaskRetrySchedule taskRetrySchedule;
     private final List<Long> retryDurationsSecs;
 
     public RecordSentTask(
             final NotificationStatusService statusService,
+            final TaskRetrySchedule taskRetrySchedule,
             @Value("${cp.notification.retry.email-durations-secs}") final List<Long> retryDurationsSecs) {
         this.statusService = statusService;
+        this.taskRetrySchedule = taskRetrySchedule;
         this.retryDurationsSecs = retryDurationsSecs;
     }
 
@@ -50,14 +56,14 @@ public class RecordSentTask implements ExecutableTask {
     @SuppressWarnings("PMD.AvoidCatchingGenericException") // any failure (DB, Service Bus) is retried, never resent
     public ExecutionInfo execute(final ExecutionInfo executionInfo) {
         final JsonObject jobData = executionInfo.getJobData();
-        final UUID notificationId = UUID.fromString(jobData.getString(KEY_NOTIFICATION_ID));
+        final UUID notificationId = fromString(jobData.getString(KEY_NOTIFICATION_ID));
         ExecutionInfo result;
         try {
             statusService.markSentInNewTransaction(notificationId, new NotificationEmailDetails(
                     jobData.getString(KEY_EMAIL_SUBJECT, null),
                     jobData.getString(KEY_EMAIL_BODY, null),
                     jobData.getString(KEY_REPLY_TO_ADDRESS, null)));
-            result = TransientFailurePolicy.completed(executionInfo);
+            result = taskRetrySchedule.completed(executionInfo);
         } catch (final RuntimeException e) {
             if (isLastAttempt(executionInfo)) {
                 LOG.error("Notification {} was sent via Office 365 but SENT could not be recorded after every retry "
@@ -67,7 +73,7 @@ public class RecordSentTask implements ExecutableTask {
                 LOG.warn("Notification {} was sent via Office 365 but SENT could not be recorded ({}) — will retry",
                         notificationId, e.getClass().getSimpleName());
             }
-            result = TransientFailurePolicy.retry(executionInfo);
+            result = taskRetrySchedule.retry(executionInfo);
         }
         return result;
     }
@@ -79,6 +85,6 @@ public class RecordSentTask implements ExecutableTask {
 
     @Override
     public Optional<List<Long>> getRetryDurationsInSecs() {
-        return Optional.of(retryDurationsSecs);
+        return of(retryDurationsSecs);
     }
 }

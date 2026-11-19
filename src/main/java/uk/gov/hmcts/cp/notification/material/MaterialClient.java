@@ -1,5 +1,10 @@
 package uk.gov.hmcts.cp.notification.material;
 
+import static java.lang.String.format;
+import static java.lang.Thread.currentThread;
+import static uk.gov.hmcts.cp.notification.material.MaterialAttachmentException.permanent;
+import static uk.gov.hmcts.cp.notification.material.MaterialAttachmentException.retryable;
+
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
@@ -18,7 +23,9 @@ import java.util.concurrent.TimeoutException;
 /**
  * Queries Material ({@code query:material.query.material}) for a document as the notification-notify
  * system user and reads back the SAS link ({@code Location}) and the filename ({@code Content-Location},
- * the text after {@code filename=}).
+ * the text after {@code filename=}). A request Material refuses (400, 401, 403), a document it does not have (404)
+ * and one that is too large (413) fail at once; any other status, a missing link or filename, a timeout or a
+ * connection failure may recover, so is retried.
  */
 @Component
 public class MaterialClient {
@@ -28,6 +35,9 @@ public class MaterialClient {
 
     private static final int HTTP_OK = 200;
     private static final int HTTP_BAD_REQUEST = 400;
+    private static final int HTTP_UNAUTHORIZED = 401;
+    private static final int HTTP_FORBIDDEN = 403;
+    private static final int HTTP_NOT_FOUND = 404;
     private static final int HTTP_PAYLOAD_TOO_LARGE = 413;
     private static final String FILENAME_MARKER = "filename=";
 
@@ -55,20 +65,25 @@ public class MaterialClient {
                 .build();
         final HttpResponse<Void> response = send(request);
         final int status = response.statusCode();
-        if (status == HTTP_BAD_REQUEST || status == HTTP_PAYLOAD_TOO_LARGE) {
-            throw MaterialAttachmentException.permanent(
-                    "Material rejected the document request (HTTP " + status + ")", status);
-        }
-        if (status != HTTP_OK) {
-            throw MaterialAttachmentException.retryable(
-                    "Material did not return the document (HTTP " + status + ")", status);
-        }
+        failUnlessOk(status);
         final String sasLink = response.headers().firstValue("Location")
                 .filter(value -> !value.isBlank())
-                .orElseThrow(() -> MaterialAttachmentException.retryable("Material answered without a document link", HTTP_OK));
+                .orElseThrow(() -> retryable("Material answered without a document link", HTTP_OK));
         final String filename = filenameFrom(response.headers().firstValue("Content-Location"))
-                .orElseThrow(() -> MaterialAttachmentException.retryable("Material answered without a document filename", HTTP_OK));
+                .orElseThrow(() -> retryable("Material answered without a document filename", HTTP_OK));
         return new MaterialDocumentLink(sasLink, filename);
+    }
+
+    private void failUnlessOk(final int status) {
+        if (status == HTTP_BAD_REQUEST || status == HTTP_PAYLOAD_TOO_LARGE) {
+            throw permanent(format("Material rejected the document request (HTTP %s)", status), status);
+        } else if (status == HTTP_UNAUTHORIZED || status == HTTP_FORBIDDEN) {
+            throw permanent(format("Material refused access to the document (HTTP %s)", status), status);
+        } else if (status == HTTP_NOT_FOUND) {
+            throw permanent("Material has no such document (HTTP 404)", status);
+        } else if (status != HTTP_OK) {
+            throw retryable(format("Material did not return the document (HTTP %s)", status), status);
+        }
     }
 
     private HttpResponse<Void> send(final HttpRequest request) {
@@ -78,13 +93,13 @@ public class MaterialClient {
             return pending.get(deadline.toMillis(), TimeUnit.MILLISECONDS);
         } catch (final TimeoutException e) {
             pending.cancel(true);
-            throw MaterialAttachmentException.retryable("Material did not answer in time", null, e);
+            throw retryable("Material did not answer in time", null, e);
         } catch (final ExecutionException e) {
-            throw MaterialAttachmentException.retryable("Material could not be reached", null, e.getCause());
+            throw retryable("Material could not be reached", null, e.getCause());
         } catch (final InterruptedException e) {
             pending.cancel(true);
-            Thread.currentThread().interrupt();
-            throw MaterialAttachmentException.retryable("Material request was interrupted", null, e);
+            currentThread().interrupt();
+            throw retryable("Material request was interrupted", null, e);
         }
     }
 

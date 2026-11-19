@@ -1,10 +1,12 @@
 package uk.gov.hmcts.cp.notification.messaging;
 
+import static org.slf4j.LoggerFactory.getLogger;
+import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
+
 import com.azure.messaging.servicebus.ServiceBusErrorContext;
 import com.azure.messaging.servicebus.ServiceBusReceivedMessageContext;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import uk.gov.hmcts.cp.notification.command.SendEmailCommand;
@@ -17,13 +19,13 @@ import uk.gov.hmcts.cp.notification.service.NotificationIngestionService;
 @Component
 @RequiredArgsConstructor
 public class SendEmailConsumer {
-    private static final Logger LOG = LoggerFactory.getLogger(SendEmailConsumer.class);
+    private static final Logger LOG = getLogger(SendEmailConsumer.class);
 
     private final CommandMessageProcessor processor;
     private final NotificationIngestionService ingestionService;
 
     public void processMessage(final ServiceBusReceivedMessageContext context) {
-        processor.process(context, SendEmailCommand.class, ingestionService::ingest);
+        processor.process(context, SendEmailCommand.class, EMAIL, ingestionService::ingest);
     }
 
     public void processError(final ServiceBusErrorContext context) {
