@@ -11,8 +11,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class ServiceBusContainerSupport {
-    public static final String COMMAND_QUEUE = "ng-send-email";
-    public static final String SLICE_COMMAND_QUEUE = "ng-send-email-slice";
+    public static final String EMAIL_COMMAND_QUEUE = "ng-send-email";
+    public static final String SLICE_EMAIL_COMMAND_QUEUE = "ng-send-email-slice";
     public static final String LETTER_COMMAND_QUEUE = "ng-send-letter";
     public static final String SLICE_LETTER_COMMAND_QUEUE = "ng-send-letter-slice";
     public static final String RESULT_QUEUE = "ng-result-correspondence";
@@ -71,19 +71,19 @@ public final class ServiceBusContainerSupport {
     }
 
     public static void registerProperties(final DynamicPropertyRegistry registry) {
-        registerProperties(registry, COMMAND_QUEUE, LETTER_COMMAND_QUEUE);
+        registerProperties(registry, EMAIL_COMMAND_QUEUE, LETTER_COMMAND_QUEUE);
     }
 
     // The sliced consumer tests listen on their own queues, so they never take a command meant for the full
     // application context, which may be running in the same JVM.
     public static void registerSliceProperties(final DynamicPropertyRegistry registry) {
-        registerProperties(registry, SLICE_COMMAND_QUEUE, SLICE_LETTER_COMMAND_QUEUE);
+        registerProperties(registry, SLICE_EMAIL_COMMAND_QUEUE, SLICE_LETTER_COMMAND_QUEUE);
     }
 
     private static void registerProperties(
-            final DynamicPropertyRegistry registry, final String commandQueue, final String letterCommandQueue) {
+            final DynamicPropertyRegistry registry, final String emailCommandQueue, final String letterCommandQueue) {
         registry.add("cp.notification.servicebus.connection-string", ServiceBusContainerSupport::getConnectionString);
-        registry.add("cp.notification.servicebus.command-queue", () -> commandQueue);
+        registry.add("cp.notification.servicebus.command-queue", () -> emailCommandQueue);
         registry.add("cp.notification.servicebus.letter-command-queue", () -> letterCommandQueue);
     }
 

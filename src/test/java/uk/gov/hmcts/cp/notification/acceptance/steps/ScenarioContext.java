@@ -18,7 +18,7 @@ public class ScenarioContext {
     private String attachmentFilename;
     private String materialId;
     private String materialUrl;
-    private String commandQueue = ServiceBusContainerSupport.COMMAND_QUEUE;
+    private String commandQueue = ServiceBusContainerSupport.EMAIL_COMMAND_QUEUE;
     private boolean firstClass;
 
     public String getCommandQueue() {

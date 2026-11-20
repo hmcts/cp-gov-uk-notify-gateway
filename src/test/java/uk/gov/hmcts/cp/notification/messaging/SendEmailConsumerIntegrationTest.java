@@ -41,7 +41,7 @@ class SendEmailConsumerIntegrationTest extends AbstractAsbConsumerSliceTest {
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
     private static final String REPLY_TO = "ng-result-correspondence";
 
-    private final ASBTestClient asb = anAsbTestClient(ServiceBusContainerSupport.SLICE_COMMAND_QUEUE);
+    private final ASBTestClient asb = anAsbTestClient(ServiceBusContainerSupport.SLICE_EMAIL_COMMAND_QUEUE);
 
     @AfterEach
     void cleanUp() {
