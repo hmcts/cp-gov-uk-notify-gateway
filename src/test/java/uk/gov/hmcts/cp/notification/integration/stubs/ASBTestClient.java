@@ -24,8 +24,8 @@ public final class ASBTestClient {
         this.queueName = queueName;
     }
 
-    public static ASBTestClient anAsbTestClient() {
-        return new ASBTestClient(ServiceBusContainerSupport.COMMAND_QUEUE);
+    public static ASBTestClient anEmailAsbTestClient() {
+        return new ASBTestClient(ServiceBusContainerSupport.EMAIL_COMMAND_QUEUE);
     }
 
     public static ASBTestClient anAsbTestClient(final String queueName) {

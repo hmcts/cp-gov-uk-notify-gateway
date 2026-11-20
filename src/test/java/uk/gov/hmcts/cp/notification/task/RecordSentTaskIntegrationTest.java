@@ -21,7 +21,7 @@ import static java.util.Map.of;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 import static uk.gov.hmcts.cp.notification.integration.Fixtures.load;
-import static uk.gov.hmcts.cp.notification.integration.stubs.ASBTestClient.anAsbTestClient;
+import static uk.gov.hmcts.cp.notification.integration.stubs.ASBTestClient.anEmailAsbTestClient;
 import static uk.gov.hmcts.cp.notification.integration.stubs.MaterialServiceStub.aMaterialService;
 import static uk.gov.hmcts.cp.notification.integration.stubs.Office365StubService.anOffice365Service;
 
@@ -57,7 +57,7 @@ class RecordSentTaskIntegrationTest extends AbstractEndToEndIntegrationTest {
         material.documentWillBeServed(materialId, "d20.pdf", new byte[OVER_GOV_NOTIFY_ATTACHMENT_LIMIT]);
         office365.sendEmailWillReturnSuccess(templateId, notificationId);
 
-        anAsbTestClient().sendToCommandQueue(load("fixtures/commands/send-email-with-material-url.json", of(
+        anEmailAsbTestClient().sendToCommandQueue(load("fixtures/commands/send-email-with-material-url.json", of(
                 "notificationId", notificationId,
                 "templateId", templateId,
                 "materialUrl", material.materialClientLinkFor(materialId))), UNPROVISIONED_REPLY_QUEUE);

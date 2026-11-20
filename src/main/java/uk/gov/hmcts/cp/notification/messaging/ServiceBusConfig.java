@@ -27,12 +27,12 @@ public class ServiceBusConfig {
     /* default */ ServiceBusProcessorClient sendEmailProcessorClient(
             @Value("${cp.notification.servicebus.connection-string:}") final String connectionString,
             @Value("${cp.notification.servicebus.namespace:}") final String namespace,
-            @Value("${cp.notification.servicebus.command-queue}") final String commandQueue,
+            @Value("${cp.notification.servicebus.command-queue}") final String emailCommandQueue,
             @Value("${cp.notification.servicebus.max-concurrent-calls:15}") final int maxConcurrentCalls,
             final SendEmailConsumer consumer) {
         final ServiceBusProcessorClient client = authenticate(new ServiceBusClientBuilder(), connectionString, namespace)
                 .processor()
-                .queueName(commandQueue)
+                .queueName(emailCommandQueue)
                 // SDK default is 1 (serial); 15 matches the legacy MDB maxSession.
                 .maxConcurrentCalls(maxConcurrentCalls)
                 .disableAutoComplete()
@@ -71,7 +71,7 @@ public class ServiceBusConfig {
     /* default */ ServiceBusHealthIndicator serviceBusHealthIndicator(
             @Value("${cp.notification.servicebus.connection-string:}") final String connectionString,
             @Value("${cp.notification.servicebus.namespace:}") final String namespace,
-            @Value("${cp.notification.servicebus.command-queue}") final String commandQueue,
+            @Value("${cp.notification.servicebus.command-queue}") final String emailCommandQueue,
             @Value("${cp.notification.servicebus.letter-command-queue}") final String letterCommandQueue,
             @Value("${cp.notification.servicebus.health-check.interval:30s}") final Duration interval,
             @Value("${cp.notification.servicebus.health-check.timeout:10s}") final Duration timeout,
@@ -82,7 +82,7 @@ public class ServiceBusConfig {
         final ServiceBusClientBuilder peekClientBuilder = authenticate(
                 new ServiceBusClientBuilder().retryOptions(oneAttemptWithinTheTimeout), connectionString, namespace);
         final Map<String, ServiceBusReceiverClient> peekClients = new LinkedHashMap<>();
-        for (final String queue : List.of(commandQueue, letterCommandQueue)) {
+        for (final String queue : List.of(emailCommandQueue, letterCommandQueue)) {
             peekClients.put(queue, peekClientBuilder.receiver().queueName(queue).buildClient());
         }
         // A peek counts until two full rounds of checks could have passed, so one slow round doesn't fail readiness.
