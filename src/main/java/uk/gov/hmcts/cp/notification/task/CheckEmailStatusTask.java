@@ -41,7 +41,7 @@ public class CheckEmailStatusTask implements ExecutableTask {
     private final NotificationStatusService statusService;
     private final TransientFailurePolicy failurePolicy;
     private final FailedNotificationRecorder failedNotificationRecorder;
-    private final GovNotifyStatusCheckFailureHandler statusCheckFailureHandler;
+    private final GovNotifyFailureHandler govNotifyFailureHandler;
     private final TaskRetrySchedule taskRetrySchedule;
     private final List<Long> retryDurationsSecs;
 
@@ -50,14 +50,14 @@ public class CheckEmailStatusTask implements ExecutableTask {
             final NotificationStatusService statusService,
             final TransientFailurePolicy failurePolicy,
             final FailedNotificationRecorder failedNotificationRecorder,
-            final GovNotifyStatusCheckFailureHandler statusCheckFailureHandler,
+            final GovNotifyFailureHandler govNotifyFailureHandler,
             final TaskRetrySchedule taskRetrySchedule,
             @Value("${cp.notification.retry.email-durations-secs}") final List<Long> retryDurationsSecs) {
         this.govNotifyClient = govNotifyClient;
         this.statusService = statusService;
         this.failurePolicy = failurePolicy;
         this.failedNotificationRecorder = failedNotificationRecorder;
-        this.statusCheckFailureHandler = statusCheckFailureHandler;
+        this.govNotifyFailureHandler = govNotifyFailureHandler;
         this.taskRetrySchedule = taskRetrySchedule;
         this.retryDurationsSecs = copyOf(retryDurationsSecs);
     }
@@ -71,7 +71,7 @@ public class CheckEmailStatusTask implements ExecutableTask {
         try {
             result = evaluate(govNotifyClient.checkStatus(reference), notificationId, executionInfo);
         } catch (final GovNotifyException govNotifyException) {
-            result = statusCheckFailureHandler.statusCheckFailed(
+            result = govNotifyFailureHandler.statusCheckFailed(
                     notificationId, EMAIL, govNotifyException, executionInfo, retryDurationsSecs);
         }
         return result;

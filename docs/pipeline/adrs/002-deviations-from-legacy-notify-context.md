@@ -240,7 +240,7 @@ The only behaviour change from moving ingress from REST to Service Bus (D1, D11)
 - **Legacy:** Material `403` and `404`, and any SAS non-`200`, are retried until the retry window ends, then the notification fails.
 - **NG:** Material `401`, `403` and `404`, and SAS `401`, `403` and `404`, fail the notification at once, with a message that says which: "Material refused access to the document (HTTP 403)", "Material has no such document (HTTP 404)", "Access to the Material document was refused (HTTP 403)", "The Material document was not found (HTTP 404)". Other statuses and network failures are still retried.
 - **Why / risk:** agreed on PEG-3719 that a bad link or refused access is an unreadable attachment that should be reported straight away, while a network problem is still retried. Retrying a refusal or a missing document cannot succeed and only delays the failure the requesting team needs to act on. Risk: a document Material has not finished storing could return `404` and now fails at once instead of on a later retry; the `notification-failed` event and the team alert say so, and the requester can send again.
-- **References:** `material/MaterialClient.java`, `material/SasDocumentFetcher.java`, `logging/OutcomeReasonClassifier.java`.
+- **References:** `failure/DownloadStatusTable.java` (which statuses fail at once, and the outcome reason for each), `material/MaterialClient.java`, `material/SasDocumentFetcher.java`.
 
 ## Material and SAS failure classification
 

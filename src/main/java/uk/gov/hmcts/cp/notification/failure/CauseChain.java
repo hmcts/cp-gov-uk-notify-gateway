@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * A failure and every cause under it, so a caller can ask what kind of failure is anywhere in the chain. Stops at a
@@ -29,6 +30,11 @@ public final class CauseChain {
     public boolean containsAnyOf(final Set<Class<? extends Throwable>> failureTypes) {
         return throwablesInChain.stream()
                 .anyMatch(throwableInChain -> isAnyOf(throwableInChain, failureTypes));
+    }
+
+    public boolean containsMatching(final Predicate<Throwable> condition) {
+        return throwablesInChain.stream()
+                .anyMatch(condition);
     }
 
     private boolean isAnyOf(final Throwable throwable, final Set<Class<? extends Throwable>> failureTypes) {

@@ -46,7 +46,7 @@ public class LetterStatusPoller {
     private final NotificationStatusService statusService;
     private final TransientFailurePolicy failurePolicy;
     private final FailedNotificationRecorder failedNotificationRecorder;
-    private final GovNotifyStatusCheckFailureHandler statusCheckFailureHandler;
+    private final GovNotifyFailureHandler govNotifyFailureHandler;
     private final TaskRetrySchedule taskRetrySchedule;
     private final ExecutionService executionService;
     private final CpTaskFactory taskFactory;
@@ -56,7 +56,7 @@ public class LetterStatusPoller {
             final NotificationStatusService statusService,
             final TransientFailurePolicy failurePolicy,
             final FailedNotificationRecorder failedNotificationRecorder,
-            final GovNotifyStatusCheckFailureHandler statusCheckFailureHandler,
+            final GovNotifyFailureHandler govNotifyFailureHandler,
             final TaskRetrySchedule taskRetrySchedule,
             final ExecutionService executionService,
             final CpTaskFactory taskFactory) {
@@ -64,7 +64,7 @@ public class LetterStatusPoller {
         this.statusService = statusService;
         this.failurePolicy = failurePolicy;
         this.failedNotificationRecorder = failedNotificationRecorder;
-        this.statusCheckFailureHandler = statusCheckFailureHandler;
+        this.govNotifyFailureHandler = govNotifyFailureHandler;
         this.taskRetrySchedule = taskRetrySchedule;
         this.executionService = executionService;
         this.taskFactory = taskFactory;
@@ -89,7 +89,7 @@ public class LetterStatusPoller {
                 result = evaluate(status, letter, executionInfo, retryDurationsSecs);
             }
         } catch (final GovNotifyException govNotifyException) {
-            result = statusCheckFailureHandler.statusCheckFailed(
+            result = govNotifyFailureHandler.statusCheckFailed(
                     letter.notificationId(), LETTER, govNotifyException, executionInfo, retryDurationsSecs);
         }
         return result;

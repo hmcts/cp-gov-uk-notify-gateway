@@ -1,5 +1,7 @@
 package uk.gov.hmcts.cp.notification.material;
 
+import static uk.gov.hmcts.cp.notification.logging.Dependency.MATERIAL;
+
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -21,11 +23,11 @@ public class SasLinkValidator {
         try {
             link = new URI(sasLink);
         } catch (final URISyntaxException e) {
-            throw MaterialAttachmentException.permanent(REJECTED, null);
+            throw MaterialAttachmentException.permanent(MATERIAL, REJECTED, null);
         }
         if (link.getScheme() == null || !isAllowedScheme(link.getScheme().toLowerCase(Locale.ROOT))
                 || link.getHost() == null || !isAllowedHost(link.getHost().toLowerCase(Locale.ROOT))) {
-            throw MaterialAttachmentException.permanent(REJECTED, null);
+            throw MaterialAttachmentException.permanent(MATERIAL, REJECTED, null);
         }
         return link;
     }

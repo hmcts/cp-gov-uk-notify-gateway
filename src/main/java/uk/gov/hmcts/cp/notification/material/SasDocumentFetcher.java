@@ -2,12 +2,19 @@ package uk.gov.hmcts.cp.notification.material;
 
 import static java.lang.String.format;
 import static java.lang.Thread.currentThread;
+import static java.util.Optional.of;
+import static uk.gov.hmcts.cp.notification.failure.DownloadSource.SAS_DOCUMENT;
+import static uk.gov.hmcts.cp.notification.logging.Dependency.BLOB_STORAGE;
+import static uk.gov.hmcts.cp.notification.logging.OutcomeReason.ATTACHMENT_ACCESS_REFUSED;
 import static uk.gov.hmcts.cp.notification.material.MaterialAttachmentException.permanent;
 import static uk.gov.hmcts.cp.notification.material.MaterialAttachmentException.retryable;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+
+import uk.gov.hmcts.cp.notification.failure.DownloadStatusTable;
+import uk.gov.hmcts.cp.notification.logging.OutcomeReason;
 
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
@@ -33,29 +40,29 @@ import java.util.concurrent.TimeoutException;
  * follows redirects. Nothing is added to the request — no credential, no system user, no correlation id —
  * so it carries only the link itself. The size cap is enforced
  * from {@code Content-Length} before reading and, when it is absent, by stopping the read as soon as the cap
- * is passed. A single deadline (connect + read timeout) bounds the whole download. Refused access (401, 403), a
- * missing document (404) and a document that is too large fail at once; any other status, a timeout or a
- * connection failure may recover, so is retried.
+ * is passed. A single deadline (connect + read timeout) bounds the whole download. A document that is too large and
+ * the statuses in {@link DownloadStatusTable} fail at once; any other status, a timeout or a connection failure may
+ * recover, so is retried. The download is from blob storage, so its failures name {@code BLOB_STORAGE}.
  */
 @Component
 public class SasDocumentFetcher {
     private static final int HTTP_OK = 200;
-    private static final int HTTP_UNAUTHORIZED = 401;
-    private static final int HTTP_FORBIDDEN = 403;
-    private static final int HTTP_NOT_FOUND = 404;
     private static final int HTTP_PAYLOAD_TOO_LARGE = 413;
     private static final byte[] DISCARDED = new byte[0];
 
     private final HttpClient httpClient;
+    private final DownloadStatusTable downloadStatusTable;
     private final long maxAttachmentBytes;
     private final Duration readTimeout;
     private final Duration deadline;
 
     public SasDocumentFetcher(
             @Qualifier(MaterialConfig.MATERIAL_HTTP_CLIENT) final HttpClient httpClient,
+            final DownloadStatusTable downloadStatusTable,
             final MaterialSettings settings,
             @Value("${cp.notification.blob.max-attachment-bytes}") final long maxAttachmentBytes) {
         this.httpClient = httpClient;
+        this.downloadStatusTable = downloadStatusTable;
         this.maxAttachmentBytes = maxAttachmentBytes;
         this.readTimeout = settings.sasReadTimeout();
         this.deadline = settings.connectTimeout().plus(settings.sasReadTimeout());
@@ -70,13 +77,23 @@ public class SasDocumentFetcher {
     }
 
     private void failUnlessOk(final int status) {
-        if (status == HTTP_UNAUTHORIZED || status == HTTP_FORBIDDEN) {
-            throw permanent(format("Access to the Material document was refused (HTTP %s)", status), status);
-        } else if (status == HTTP_NOT_FOUND) {
-            throw permanent("The Material document was not found (HTTP 404)", status);
+        if (downloadStatusTable.failsAtOnce(SAS_DOCUMENT, status)) {
+            throw permanent(BLOB_STORAGE, permanentFailureMessage(status), status);
         } else if (status != HTTP_OK) {
-            throw retryable(format("The Material document could not be downloaded (HTTP %s)", status), status);
+            throw retryable(
+                    BLOB_STORAGE, format("The Material document could not be downloaded (HTTP %s)", status), status);
         }
+    }
+
+    private String permanentFailureMessage(final int status) {
+        final OutcomeReason outcomeReason = downloadStatusTable.outcomeReasonFor(of(status));
+        final String message;
+        if (outcomeReason == ATTACHMENT_ACCESS_REFUSED) {
+            message = format("Access to the Material document was refused (HTTP %s)", status);
+        } else {
+            message = format("The Material document was not found (HTTP %s)", status);
+        }
+        return message;
     }
 
     private HttpResponse<byte[]> send(final HttpRequest request) {
@@ -85,18 +102,18 @@ public class SasDocumentFetcher {
             return pending.get(deadline.toMillis(), TimeUnit.MILLISECONDS);
         } catch (final TimeoutException e) {
             pending.cancel(true);
-            throw retryable("The Material document was not downloaded in time", null, e);
+            throw retryable(BLOB_STORAGE, "The Material document was not downloaded in time", null, e);
         } catch (final ExecutionException e) {
             final DocumentTooLargeException tooLarge = tooLargeCause(e);
             if (tooLarge != null) {
-                throw permanent(tooLargeMessage(tooLarge), HTTP_PAYLOAD_TOO_LARGE);
+                throw permanent(BLOB_STORAGE, tooLargeMessage(tooLarge), HTTP_PAYLOAD_TOO_LARGE);
             }
             throw retryable(
-                    "The Material document could not be downloaded", null, e.getCause());
+                    BLOB_STORAGE, "The Material document could not be downloaded", null, e.getCause());
         } catch (final InterruptedException e) {
             pending.cancel(true);
             currentThread().interrupt();
-            throw retryable("The Material document download was interrupted", null, e);
+            throw retryable(BLOB_STORAGE, "The Material document download was interrupted", null, e);
         }
     }
 

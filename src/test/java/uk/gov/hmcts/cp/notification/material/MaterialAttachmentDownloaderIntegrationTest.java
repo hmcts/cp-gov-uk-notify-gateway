@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import uk.gov.hmcts.cp.notification.failure.DownloadStatusTable;
 import uk.gov.hmcts.cp.notification.integration.config.WireMockSasLinkValidator;
 import uk.gov.hmcts.cp.notification.integration.stubs.MaterialServiceStub;
 import uk.gov.hmcts.cp.notification.integration.stubs.support.WireMockSupport;
@@ -21,6 +22,7 @@ import static uk.gov.hmcts.cp.notification.integration.Fixtures.loadBytes;
 import static uk.gov.hmcts.cp.notification.integration.stubs.MaterialServiceStub.aMaterialService;
 import static uk.gov.hmcts.cp.notification.integration.testdata.MaterialSettingsFactory.SYSTEM_USER_ID;
 import static uk.gov.hmcts.cp.notification.integration.testdata.MaterialSettingsFactory.aMaterialSettings;
+import static uk.gov.hmcts.cp.notification.logging.Channel.EMAIL;
 
 class MaterialAttachmentDownloaderIntegrationTest {
     private static final String FILENAME = "d20.pdf";
@@ -44,7 +46,7 @@ class MaterialAttachmentDownloaderIntegrationTest {
             material.documentWillBeServed(materialId, FILENAME, DOCUMENT);
 
             final Attachment attachment = downloaderWithMaxBytes(MAX_ATTACHMENT_BYTES)
-                    .download(material.materialClientLinkFor(materialId), notificationId);
+                    .download(material.materialClientLinkFor(materialId), notificationId, EMAIL);
 
             assertThat(attachment.content()).isEqualTo(DOCUMENT);
             assertThat(attachment.filename()).isEqualTo(FILENAME);
@@ -57,7 +59,7 @@ class MaterialAttachmentDownloaderIntegrationTest {
             material.documentWillBeServed(materialId, FILENAME, DOCUMENT);
 
             final Attachment attachment = downloaderWithMaxBytes(MAX_ATTACHMENT_BYTES)
-                    .download(material.materialServiceLinkFor(materialId), notificationId);
+                    .download(material.materialServiceLinkFor(materialId), notificationId, EMAIL);
 
             assertThat(attachment.content()).isEqualTo(DOCUMENT);
             material.documentWasRequestedFor(materialId, notificationId, SYSTEM_USER_ID);
@@ -72,7 +74,7 @@ class MaterialAttachmentDownloaderIntegrationTest {
             material.documentLinkWillRedirect(materialId, FILENAME);
 
             assertThatThrownBy(() -> downloaderWithMaxBytes(MAX_ATTACHMENT_BYTES)
-                    .download(material.materialClientLinkFor(materialId), notificationId))
+                    .download(material.materialClientLinkFor(materialId), notificationId, EMAIL))
                     .isInstanceOf(MaterialAttachmentException.class)
                     .hasFieldOrPropertyWithValue("statusCode", 302)
                     .hasFieldOrPropertyWithValue("retryable", true);
@@ -86,7 +88,7 @@ class MaterialAttachmentDownloaderIntegrationTest {
 
         @Test
         void refuses_a_link_on_an_unrecognised_host_permanently_without_calling_material() {
-            assertThatThrownBy(() -> downloader().download(material.unrecognisedLinkFor(materialId), notificationId))
+            assertThatThrownBy(() -> downloader().download(material.unrecognisedLinkFor(materialId), notificationId, EMAIL))
                     .isInstanceOf(MaterialAttachmentException.class)
                     .hasFieldOrPropertyWithValue("statusCode", null)
                     .hasFieldOrPropertyWithValue("retryable", false);
@@ -162,7 +164,7 @@ class MaterialAttachmentDownloaderIntegrationTest {
             material.materialWillAnswerAfter(materialId, FILENAME, Duration.ofSeconds(2));
 
             assertThatThrownBy(() -> downloaderWithTimeouts(Duration.ofMillis(300), Duration.ofSeconds(30))
-                    .download(material.materialClientLinkFor(materialId), notificationId))
+                    .download(material.materialClientLinkFor(materialId), notificationId, EMAIL))
                     .isInstanceOf(MaterialAttachmentException.class)
                     .hasFieldOrPropertyWithValue("statusCode", null)
                     .hasFieldOrPropertyWithValue("retryable", true);
@@ -216,7 +218,7 @@ class MaterialAttachmentDownloaderIntegrationTest {
             material.documentWillBeServedAfter(materialId, FILENAME, DOCUMENT, Duration.ofSeconds(2));
 
             assertThatThrownBy(() -> downloaderWithTimeouts(Duration.ofSeconds(35), Duration.ofMillis(300))
-                    .download(material.materialClientLinkFor(materialId), notificationId))
+                    .download(material.materialClientLinkFor(materialId), notificationId, EMAIL))
                     .isInstanceOf(MaterialAttachmentException.class)
                     .hasFieldOrPropertyWithValue("statusCode", null)
                     .hasFieldOrPropertyWithValue("retryable", true);
@@ -231,7 +233,7 @@ class MaterialAttachmentDownloaderIntegrationTest {
             material.documentWillBeServed(materialId, FILENAME, DOCUMENT);
 
             assertThatThrownBy(() -> downloaderWithMaxBytes(DOCUMENT.length - 1L)
-                    .download(material.materialClientLinkFor(materialId), notificationId))
+                    .download(material.materialClientLinkFor(materialId), notificationId, EMAIL))
                     .isInstanceOf(MaterialAttachmentException.class)
                     .hasFieldOrPropertyWithValue("statusCode", 413)
                     .hasFieldOrPropertyWithValue("retryable", false)
@@ -244,7 +246,7 @@ class MaterialAttachmentDownloaderIntegrationTest {
             material.documentWillBeServedWithoutDeclaringItsLength(materialId, FILENAME, DOCUMENT);
 
             assertThatThrownBy(() -> downloaderWithMaxBytes(DOCUMENT.length - 1L)
-                    .download(material.materialClientLinkFor(materialId), notificationId))
+                    .download(material.materialClientLinkFor(materialId), notificationId, EMAIL))
                     .isInstanceOf(MaterialAttachmentException.class)
                     .hasFieldOrPropertyWithValue("statusCode", 413)
                     .hasFieldOrPropertyWithValue("retryable", false)
@@ -254,7 +256,7 @@ class MaterialAttachmentDownloaderIntegrationTest {
     }
 
     private void assertFailure(final Integer status, final boolean retryable, final String message) {
-        assertThatThrownBy(() -> downloader().download(material.materialClientLinkFor(materialId), notificationId))
+        assertThatThrownBy(() -> downloader().download(material.materialClientLinkFor(materialId), notificationId, EMAIL))
                 .isInstanceOf(MaterialAttachmentException.class)
                 .hasMessage(message)
                 .hasFieldOrPropertyWithValue("statusCode", status)
@@ -262,7 +264,7 @@ class MaterialAttachmentDownloaderIntegrationTest {
     }
 
     private void assertFailure(final Integer status, final boolean retryable) {
-        assertThatThrownBy(() -> downloader().download(material.materialClientLinkFor(materialId), notificationId))
+        assertThatThrownBy(() -> downloader().download(material.materialClientLinkFor(materialId), notificationId, EMAIL))
                 .isInstanceOf(MaterialAttachmentException.class)
                 .hasFieldOrPropertyWithValue("statusCode", status)
                 .hasFieldOrPropertyWithValue("retryable", retryable);
@@ -286,8 +288,8 @@ class MaterialAttachmentDownloaderIntegrationTest {
         final HttpClient sharedClient = new MaterialConfig().materialHttpClient(settings);
         return new MaterialAttachmentDownloader(
                 new MaterialUrlResolver(new MaterialHostMatcher(settings), new LoopbackMaterialLinkRewriter(settings)),
-                new MaterialClient(sharedClient, settings),
+                new MaterialClient(sharedClient, new DownloadStatusTable(), settings),
                 new WireMockSasLinkValidator(),
-                new SasDocumentFetcher(sharedClient, settings, maxBytes));
+                new SasDocumentFetcher(sharedClient, new DownloadStatusTable(), settings, maxBytes));
     }
 }

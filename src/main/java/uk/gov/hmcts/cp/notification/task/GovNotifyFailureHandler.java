@@ -2,12 +2,14 @@ package uk.gov.hmcts.cp.notification.task;
 
 import static java.lang.String.format;
 import static org.slf4j.LoggerFactory.getLogger;
+import static uk.gov.hmcts.cp.notification.logging.Channel.LETTER;
 import static uk.gov.hmcts.cp.notification.logging.LogField.CHANNEL;
 import static uk.gov.hmcts.cp.notification.logging.LogField.DEPENDENCY;
 import static uk.gov.hmcts.cp.notification.logging.LogField.OPERATION;
 import static uk.gov.hmcts.cp.notification.logging.LogField.OUTCOME;
 import static uk.gov.hmcts.cp.notification.logging.LogField.REASON;
 import static uk.gov.hmcts.cp.notification.logging.LogField.STATUS_CODE;
+import static uk.gov.hmcts.cp.notification.task.RetryCause.GOV_NOTIFY_SEND;
 import static uk.gov.hmcts.cp.notification.task.RetryCause.STATUS_CHECK;
 
 import org.slf4j.Logger;
@@ -32,13 +34,20 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * What an email or letter status check does when asking Gov.Notify for the status fails. A failure that may recover
- * is retried by {@link TransientFailurePolicy}. Any other is logged with the call's fields (PEG-3720) and the
- * notification recorded as FAILED, as a permanent send failure is.
+ * What a task does when a call to Gov.Notify fails: sending an email or a letter, or asking for its status. A failure
+ * that may recover is retried by {@link TransientFailurePolicy}. Any other is logged with the call's fields
+ * (PEG-3720) and the notification recorded as FAILED. Without an HTTP response, the line and the outcome reason say
+ * whether Gov.Notify could not be reached or did not respond, so the outage alert can count it.
  */
 @Component
-public class GovNotifyStatusCheckFailureHandler {
-    private final Logger logger = getLogger(GovNotifyStatusCheckFailureHandler.class);
+public class GovNotifyFailureHandler {
+    private static final String EMAIL_SEND_EXHAUSTED_REASON = "Gov.Notify send did not recover within the retry window";
+    private static final String LETTER_SEND_EXHAUSTED_REASON =
+            "Gov.Notify letter send did not recover within the retry window";
+    private static final String STATUS_CHECK_EXHAUSTED_REASON =
+            "Gov.Notify status polling did not recover within the retry window";
+
+    private final Logger logger = getLogger(GovNotifyFailureHandler.class);
 
     private final GovNotifyFailureClassifier govNotifyFailureClassifier;
     private final FailureReasonClassifier failureReasonClassifier;
@@ -46,7 +55,7 @@ public class GovNotifyStatusCheckFailureHandler {
     private final TransientFailurePolicy failurePolicy;
     private final FailedNotificationRecorder failedNotificationRecorder;
 
-    public GovNotifyStatusCheckFailureHandler(
+    public GovNotifyFailureHandler(
             final GovNotifyFailureClassifier govNotifyFailureClassifier,
             final FailureReasonClassifier failureReasonClassifier,
             final OutcomeReasonClassifier outcomeReasonClassifier,
@@ -59,9 +68,30 @@ public class GovNotifyStatusCheckFailureHandler {
         this.failedNotificationRecorder = failedNotificationRecorder;
     }
 
+    public ExecutionInfo sendFailed(
+            final UUID notificationId,
+            final Channel channel,
+            final GovNotifyException govNotifyException,
+            final ExecutionInfo executionInfo,
+            final List<Long> retryDurationsSecs) {
+        final GovNotifyCall govNotifyCall =
+                new GovNotifyCall(GOV_NOTIFY_SEND, notificationId, channel, sendExhaustedReasonFor(channel));
+        return failed(govNotifyCall, govNotifyException, executionInfo, retryDurationsSecs);
+    }
+
     public ExecutionInfo statusCheckFailed(
             final UUID notificationId,
             final Channel channel,
+            final GovNotifyException govNotifyException,
+            final ExecutionInfo executionInfo,
+            final List<Long> retryDurationsSecs) {
+        final GovNotifyCall govNotifyCall =
+                new GovNotifyCall(STATUS_CHECK, notificationId, channel, STATUS_CHECK_EXHAUSTED_REASON);
+        return failed(govNotifyCall, govNotifyException, executionInfo, retryDurationsSecs);
+    }
+
+    private ExecutionInfo failed(
+            final GovNotifyCall govNotifyCall,
             final GovNotifyException govNotifyException,
             final ExecutionInfo executionInfo,
             final List<Long> retryDurationsSecs) {
@@ -69,21 +99,21 @@ public class GovNotifyStatusCheckFailureHandler {
         final ExecutionInfo result;
         if (govNotifyFailureClassifier.isTemporary(govNotifyException)) {
             final TransientFailure transientFailure = new TransientFailure(
-                    notificationId,
-                    STATUS_CHECK,
-                    channel,
+                    govNotifyCall.notificationId(),
+                    govNotifyCall.retryCause(),
+                    govNotifyCall.channel(),
                     httpStatusCode,
                     govNotifyException,
-                    "Gov.Notify status polling did not recover within the retry window");
+                    govNotifyCall.exhaustedReason());
             result = failurePolicy.retryOrFail(transientFailure, executionInfo, retryDurationsSecs);
         } else {
             final Optional<FailureReason> failureReason =
                     failureReasonClassifier.classify(httpStatusCode, govNotifyException);
-            logStatusCheckFailedPermanently(notificationId, channel, httpStatusCode, failureReason);
+            logFailedPermanently(govNotifyCall, httpStatusCode, failureReason);
             final OutcomeReason outcomeReason = outcomeReasonClassifier.providerFailed(failureReason);
             final NotificationFailure notificationFailure = new NotificationFailure(
-                    notificationId,
-                    channel,
+                    govNotifyCall.notificationId(),
+                    govNotifyCall.channel(),
                     govNotifyException.getHttpStatus(),
                     govNotifyException.getMessage(),
                     outcomeReason);
@@ -92,24 +122,41 @@ public class GovNotifyStatusCheckFailureHandler {
         return result;
     }
 
-    /** {@code failureReason} says why when Gov.Notify gave no HTTP response. */
-    private void logStatusCheckFailedPermanently(
-            final UUID notificationId,
-            final Channel channel,
+    /** Sent to the requesting team in {@code notification-failed}, so each keeps the text it has always had. */
+    private String sendExhaustedReasonFor(final Channel channel) {
+        final String exhaustedReason;
+        if (channel == LETTER) {
+            exhaustedReason = LETTER_SEND_EXHAUSTED_REASON;
+        } else {
+            exhaustedReason = EMAIL_SEND_EXHAUSTED_REASON;
+        }
+        return exhaustedReason;
+    }
+
+    private void logFailedPermanently(
+            final GovNotifyCall govNotifyCall,
             final Optional<Integer> httpStatusCode,
             final Optional<FailureReason> failureReason) {
+        final RetryCause retryCause = govNotifyCall.retryCause();
+        final Operation operation = retryCause.getOperation();
+        final Channel channel = govNotifyCall.channel();
+        final String operationName = operation.getFieldValue();
+        final String channelName = channel.getFieldValue();
         final Optional<String> httpStatusCodeText = httpStatusCode.map(String::valueOf);
         final String message = format(
-                "Permanent Gov.Notify status check failure for notification '%s' (http '%s') — marking FAILED",
-                notificationId, httpStatusCodeText.orElse("none"));
-        final String channelName = channel.getFieldValue();
+                "Permanent Gov.Notify %s failure for %s notification '%s' (http '%s') — marking FAILED",
+                operationName, channelName, govNotifyCall.notificationId(), httpStatusCodeText.orElse("none"));
         final LoggingEventBuilder loggingEventBuilder = logger.atWarn()
                 .addKeyValue(DEPENDENCY, Dependency.GOV_UK_NOTIFY.getFieldValue())
-                .addKeyValue(OPERATION, Operation.STATUS_CHECK.getFieldValue())
+                .addKeyValue(OPERATION, operationName)
                 .addKeyValue(CHANNEL, channelName)
                 .addKeyValue(OUTCOME, CallOutcome.PERMANENT_FAILURE.getFieldValue());
         httpStatusCode.ifPresent(code -> loggingEventBuilder.addKeyValue(STATUS_CODE, code));
         failureReason.ifPresent(reason -> loggingEventBuilder.addKeyValue(REASON, reason.getFieldValue()));
         loggingEventBuilder.log(message);
+    }
+
+    /** Which Gov.Notify call failed, for which notification, and what to record if its retries run out. */
+    private record GovNotifyCall(RetryCause retryCause, UUID notificationId, Channel channel, String exhaustedReason) {
     }
 }
