@@ -7,6 +7,7 @@ import java.io.UncheckedIOException;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
+import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpTimeoutException;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
@@ -44,6 +45,35 @@ class FailureReasonClassifierTest {
         final TimeoutException timeoutException = new TimeoutException("no answer in time");
 
         final Optional<FailureReason> failureReason = failureReasonClassifier.classify(timeoutException);
+
+        assertThat(failureReason).contains(NO_RESPONSE);
+    }
+
+    @Test
+    void classify_should_say_unreachable_for_a_timeout_while_connecting_with_javas_http_client() {
+        final HttpConnectTimeoutException httpConnectTimeoutException =
+                new HttpConnectTimeoutException("HTTP connect timed out");
+
+        final Optional<FailureReason> failureReason = failureReasonClassifier.classify(httpConnectTimeoutException);
+
+        assertThat(failureReason).contains(UNREACHABLE);
+    }
+
+    @Test
+    void classify_should_say_unreachable_for_a_socket_timeout_while_connecting_however_deep_in_the_causes() {
+        final SocketTimeoutException socketTimeoutException = new SocketTimeoutException("Connect timed out");
+        final IOException ioException = new IOException("wrapped", socketTimeoutException);
+
+        final Optional<FailureReason> failureReason = failureReasonClassifier.classify(ioException);
+
+        assertThat(failureReason).contains(UNREACHABLE);
+    }
+
+    @Test
+    void classify_should_say_no_response_for_a_socket_timeout_without_a_message() {
+        final SocketTimeoutException socketTimeoutException = new SocketTimeoutException();
+
+        final Optional<FailureReason> failureReason = failureReasonClassifier.classify(socketTimeoutException);
 
         assertThat(failureReason).contains(NO_RESPONSE);
     }

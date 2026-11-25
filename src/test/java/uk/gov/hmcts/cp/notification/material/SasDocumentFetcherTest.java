@@ -9,12 +9,15 @@ import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static uk.gov.hmcts.cp.notification.integration.testdata.MaterialSettingsFactory.SYSTEM_USER_ID;
+import static uk.gov.hmcts.cp.notification.logging.Dependency.BLOB_STORAGE;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+
+import uk.gov.hmcts.cp.notification.failure.DownloadStatusTable;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -36,7 +39,7 @@ class SasDocumentFetcherTest {
     void createFetcherWithAOneMillisecondDeadline() {
         final MaterialSettings materialSettings = new MaterialSettings(
                 SYSTEM_USER_ID, create("http://material-service.example.internal"), ofMillis(1), ofMillis(1), ofMillis(1));
-        sasDocumentFetcher = new SasDocumentFetcher(httpClient, materialSettings, 1_024);
+        sasDocumentFetcher = new SasDocumentFetcher(httpClient, new DownloadStatusTable(), materialSettings, 1_024);
         doReturn(responseThatNeverArrives).when(httpClient).sendAsync(any(), any());
     }
 
@@ -46,6 +49,7 @@ class SasDocumentFetcherTest {
                 catchThrowableOfType(MaterialAttachmentException.class, () -> sasDocumentFetcher.fetch(SAS_LINK));
 
         assertThat(materialAttachmentException.isRetryable()).isTrue();
+        assertThat(materialAttachmentException.getDependency()).isEqualTo(BLOB_STORAGE);
         assertThat(materialAttachmentException.getMessage()).isEqualTo("The Material document was not downloaded in time");
         assertThat(materialAttachmentException.getCause()).isInstanceOf(TimeoutException.class);
         assertThat(responseThatNeverArrives.isCancelled()).isTrue();

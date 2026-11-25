@@ -22,6 +22,19 @@ class CauseChainTest {
     }
 
     @Test
+    void should_contain_a_cause_that_matches_a_condition() {
+        final SocketTimeoutException socketTimeoutException = new SocketTimeoutException("Connect timed out");
+        final IOException ioException = new IOException("wrapped", socketTimeoutException);
+
+        final CauseChain causeChain = new CauseChain(ioException);
+
+        assertThat(causeChain.containsMatching(throwable -> "Connect timed out".equals(throwable.getMessage())))
+                .isTrue();
+        assertThat(causeChain.containsMatching(throwable -> "Read timed out".equals(throwable.getMessage())))
+                .isFalse();
+    }
+
+    @Test
     void should_contain_a_cause_however_deep_and_its_supertypes() {
         final ConnectException connectException = new ConnectException("Connection refused");
         final UncheckedIOException uncheckedIoException = new UncheckedIOException(connectException);

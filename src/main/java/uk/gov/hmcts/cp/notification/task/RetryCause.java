@@ -19,6 +19,7 @@ public enum RetryCause {
     OFFICE365_SEND("invoking the Office 365 send API", MICROSOFT_365, SEND),
     ATTACHMENT_DOWNLOAD("downloading the attachment from blob storage", BLOB_STORAGE, DOWNLOAD),
     MATERIAL_DOWNLOAD("downloading the Material document", MATERIAL, DOWNLOAD),
+    SAS_DOWNLOAD("downloading the Material document from blob storage", BLOB_STORAGE, DOWNLOAD),
     STATUS_CHECK("invoking the Gov.Notify status API", GOV_UK_NOTIFY, Operation.STATUS_CHECK);
 
     private final String description;
