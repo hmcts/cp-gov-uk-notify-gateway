@@ -32,15 +32,23 @@ public record SendEmailCommand(
         String clientContext
 ) {
     /**
-     * Keeps personal data out of logs: the reply-to address and personalisation are redacted (the recipient is
-     * shown, so a send can be traced), and
-     * fileUri, materialUrl, replyToAddressId and clientContext are left out on purpose, because blob paths and
-     * Material links can carry case or person names. Do not add them back.
+     * Keeps personal data out of logs. fileUri, materialUrl and clientContext are left out because blob paths and
+     * Material links can carry case or person names.
      */
     @Override
     public String toString() {
-        return "SendEmailCommand[notificationId=" + notificationId + ", templateId=" + templateId
-                + ", sendToAddress=" + sendToAddress + ", replyToAddress=" + redacted(replyToAddress)
-                + ", personalisation=" + redacted(personalisation) + "]";
+        return """
+                SendEmailCommand[\
+                notificationId=%s, \
+                templateId=%s, \
+                sendToAddress=%s, \
+                replyToAddress=%s, \
+                personalisation=%s]"""
+                .formatted(
+                        notificationId,
+                        templateId,
+                        redacted(sendToAddress),
+                        redacted(replyToAddress),
+                        redacted(personalisation));
     }
 }
