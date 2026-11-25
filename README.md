@@ -27,6 +27,11 @@ behalf of CPP contexts. It is the re-platform of the legacy WildFly `cpp-context
 Java 25+ · Spring Boot 4.x · Azure Service Bus & Blob via **managed-identity RBAC** (no SAS) ·
 cp-task-manager · Flyway/Postgres · deployed to AKS via Flux GitOps.
 
+## Support
+
+What fires which Azure Monitor alert, and what does not: [docs/support/ALERTS.md](docs/support/ALERTS.md).
+Which dependency errors are retried and which fail the notification: [docs/support/ERROR-HANDLING.md](docs/support/ERROR-HANDLING.md).
+
 ## Design & plan
 
 Design, implementation plan and epics live in the knowledge base:
